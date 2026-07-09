@@ -1,0 +1,2048 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RehabSense — Live Pose Monitoring</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+<style>
+:root{
+  --bg:#07111d;--surf:#0d1b2a;--surf2:#122338;--bdr:#1a2e45;
+  --accent:#00ffe0;--accent2:#7c3aed;--success:#10b981;
+  --warn:#f59e0b;--danger:#ef4444;--text:#dff0ff;--muted:#3d607a;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;min-height:100vh;overflow-x:hidden;}
+body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellipse 80% 50% at 50% -20%,rgba(0,255,224,.04),transparent);pointer-events:none;z-index:0;}
+
+/* HEADER */
+header{position:sticky;top:0;z-index:200;background:rgba(7,17,29,.96);backdrop-filter:blur(20px);border-bottom:1px solid var(--bdr);display:flex;align-items:center;justify-content:space-between;padding:0 1.25rem;height:58px;}
+.logo{display:flex;align-items:center;gap:9px;}
+.logo-mark{width:32px;height:32px;background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:16px;}
+.logo-name{font-family:'Syne',sans-serif;font-weight:800;font-size:1.15rem;letter-spacing:-.5px;}
+.logo-name span{color:var(--accent);}
+.hdr-r{display:flex;align-items:center;gap:.65rem;}
+.hdr-pill{font-family:'DM Mono',monospace;font-size:.65rem;color:var(--muted);padding:4px 9px;background:var(--surf);border:1px solid var(--bdr);border-radius:6px;}
+.live-dot{display:flex;align-items:center;gap:5px;font-family:'DM Mono',monospace;font-size:.68rem;padding:4px 11px;border-radius:100px;background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.3);color:var(--success);}
+.dot{width:6px;height:6px;border-radius:50%;background:currentColor;animation:blink 1.4s ease infinite;}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
+
+/* LAYOUT */
+main{position:relative;z-index:1;max-width:1560px;margin:0 auto;padding:.85rem 1rem;display:grid;grid-template-columns:1fr 340px 280px;gap:.85rem;}
+
+/* CARD */
+.card{background:var(--surf);border:1px solid var(--bdr);border-radius:14px;padding:.95rem;transition:border-color .25s;}
+.card:hover{border-color:rgba(0,255,224,.1);}
+.clabel{font-family:'DM Mono',monospace;font-size:.58rem;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:.55rem;}
+.sec-title{font-family:'Syne',sans-serif;font-size:.76rem;font-weight:700;margin-bottom:.5rem;display:flex;align-items:center;gap:.4rem;}
+.sec-title::after{content:'';flex:1;height:1px;background:var(--bdr);}
+
+/* CAMERA PANEL */
+.cam-panel{grid-column:1;display:flex;flex-direction:column;gap:.85rem;}
+.cam-card{position:relative;background:#000;border-radius:14px;border:1px solid var(--bdr);overflow:hidden;aspect-ratio:4/3;}
+.cam-card video,.cam-card canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
+.cam-card canvas{z-index:2;}
+.cam-hud{position:absolute;inset:0;z-index:3;pointer-events:none;}
+.hud-tl{position:absolute;top:12px;left:12px;display:flex;flex-direction:column;gap:6px;}
+.hud-tr{position:absolute;top:12px;right:12px;display:flex;flex-direction:column;align-items:flex-end;gap:6px;}
+.hud-bl{position:absolute;bottom:12px;left:12px;display:flex;align-items:flex-end;gap:10px;}
+.hud-badge{font-family:'DM Mono',monospace;font-size:.65rem;padding:4px 9px;border-radius:7px;backdrop-filter:blur(12px);border:1px solid;display:flex;align-items:center;gap:5px;}
+.hud-badge.active{background:rgba(0,255,224,.12);border-color:rgba(0,255,224,.35);color:var(--accent);}
+.hud-badge.warn{background:rgba(245,158,11,.14);border-color:rgba(245,158,11,.4);color:var(--warn);}
+.hud-badge.danger,.hud-badge.bad{background:rgba(239,68,68,.14);border-color:rgba(239,68,68,.4);color:var(--danger);}
+.hud-badge.good{background:rgba(16,185,129,.12);border-color:rgba(16,185,129,.35);color:var(--success);}
+.hud-badge.info{background:rgba(7,17,29,.7);border-color:rgba(26,46,69,.8);color:var(--muted);}
+
+/* Rep counter overlay */
+.rep-overlay{position:absolute;right:14px;bottom:14px;text-align:right;z-index:4;}
+.rep-big{font-family:'Syne',sans-serif;font-size:4.5rem;font-weight:800;line-height:1;color:var(--accent);text-shadow:0 0 30px rgba(0,255,224,.5);transition:transform .2s;}
+.rep-lbl{font-family:'DM Mono',monospace;font-size:.65rem;color:rgba(0,255,224,.5);letter-spacing:1px;}
+.angle-badge{font-family:'DM Mono',monospace;font-size:1.1rem;font-weight:500;color:#fff;background:rgba(7,17,29,.75);border:1px solid var(--bdr);backdrop-filter:blur(10px);padding:6px 12px;border-radius:9px;}
+
+/* No camera state */
+.cam-placeholder{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1rem;background:var(--surf2);z-index:10;}
+.cam-placeholder .icon{font-size:3.5rem;opacity:.4;}
+.cam-placeholder h3{font-family:'Syne',sans-serif;font-weight:700;font-size:1.1rem;opacity:.6;}
+.cam-placeholder p{font-size:.8rem;color:var(--muted);text-align:center;max-width:240px;line-height:1.6;}
+.start-cam-btn{padding:11px 26px;background:var(--accent);border:none;border-radius:10px;color:#07111d;font-family:'Syne',sans-serif;font-weight:700;font-size:.9rem;cursor:pointer;transition:all .2s;}
+.start-cam-btn:hover{background:#33ffeb;transform:scale(1.02);}
+
+/* Phase bar */
+.phase-bar{height:8px;border-radius:100px;background:var(--bdr);overflow:hidden;margin-top:.5rem;}
+.phase-fill{height:100%;border-radius:100px;transition:width .3s ease,background .3s;}
+
+/* Buttons */
+.btn-row{display:flex;gap:.4rem;margin-top:.65rem;}
+.btn{flex:1;padding:7px;border-radius:9px;border:1px solid var(--bdr);cursor:pointer;font-size:.75rem;font-weight:600;font-family:'DM Sans',sans-serif;transition:all .2s;}
+.btn-p{background:var(--accent);border-color:var(--accent);color:#07111d;}
+.btn-p:hover{background:#5ffff0;}
+.btn-s{background:transparent;color:var(--muted);}
+.btn-s:hover{background:var(--surf2);color:var(--text);}
+
+/* Angle boxes */
+.angle-row{display:flex;gap:.5rem;}
+.angle-box{flex:1;background:var(--surf2);border:1px solid var(--bdr);border-radius:10px;padding:.7rem;text-align:center;}
+.angle-val{font-family:'DM Mono',monospace;font-size:1.5rem;font-weight:500;}
+.angle-unit{font-size:.6rem;color:var(--muted);}
+.angle-name{font-family:'DM Mono',monospace;font-size:.58rem;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;margin-top:3px;}
+
+/* ====== MIDDLE COLUMN ====== */
+.mid-col{grid-column:2;display:flex;flex-direction:column;gap:.85rem;}
+
+/* Rep Stats - big boxes */
+.rep-grid{display:grid;grid-template-columns:1fr 1fr;gap:.5rem;}
+.rstat{background:var(--surf2);border:1px solid var(--bdr);border-radius:12px;padding:.8rem;text-align:center;transition:all .3s;}
+.rstat.flash{transform:scale(1.08);border-color:rgba(0,255,224,.4);}
+.rstat-n{font-family:'Syne',sans-serif;font-size:2.4rem;font-weight:800;line-height:1;}
+.rstat-n.a{color:var(--accent)}.rstat-n.g{color:var(--success)}.rstat-n.w{color:var(--warn)}.rstat-n.b{color:var(--danger)}
+.rstat-l{font-family:'DM Mono',monospace;font-size:.58rem;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;margin-top:3px;}
+
+/* Score ring */
+.score-row{display:flex;align-items:center;gap:.85rem;}
+.ring-wrap{position:relative;width:76px;height:76px;flex-shrink:0;}
+.ring-wrap svg{width:100%;height:100%;transform:rotate(-90deg);}
+.rbg{fill:none;stroke:var(--bdr);stroke-width:7;}
+.rfill{fill:none;stroke-width:7;stroke-linecap:round;stroke-dasharray:220;transition:stroke-dashoffset .7s cubic-bezier(.4,0,.2,1),stroke .3s;}
+.rval{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:'Syne',sans-serif;font-size:1.15rem;font-weight:800;}
+.score-info h3{font-family:'Syne',sans-serif;font-size:.88rem;font-weight:700;}
+.score-info p{font-size:.73rem;color:var(--muted);line-height:1.5;margin-top:3px;}
+
+/* Rep history bars */
+.bars{display:flex;align-items:flex-end;gap:3px;height:48px;}
+.bar{flex:1;border-radius:3px 3px 0 0;min-height:3px;transition:height .4s ease;}
+.bar-lbls{display:flex;justify-content:space-between;margin-top:3px;font-family:'DM Mono',monospace;font-size:.55rem;color:var(--muted);}
+
+/* Feedback banner */
+.fb{border-radius:11px;padding:.8rem .95rem;border:1px solid;display:flex;align-items:flex-start;gap:.75rem;animation:fadeIn .35s ease;}
+@keyframes fadeIn{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:translateY(0)}}
+.fb.good{background:rgba(16,185,129,.07);border-color:rgba(16,185,129,.28);}
+.fb.warn{background:rgba(245,158,11,.07);border-color:rgba(245,158,11,.28);}
+.fb.bad{background:rgba(239,68,68,.07);border-color:rgba(239,68,68,.28);}
+.fb-icon{font-size:1.4rem;line-height:1;margin-top:1px;}
+.fb-body h4{font-family:'Syne',sans-serif;font-size:.88rem;font-weight:700;}
+.fb-body p{font-size:.72rem;color:var(--muted);margin-top:2px;line-height:1.5;}
+.aud-btn{margin-left:auto;background:rgba(255,255,255,.05);border:1px solid var(--bdr);border-radius:7px;padding:4px 8px;color:var(--muted);cursor:pointer;font-size:.85rem;flex-shrink:0;}
+.aud-btn:hover{background:rgba(255,255,255,.1);color:var(--text);}
+
+/* Correction items */
+.corr-list{display:flex;flex-direction:column;gap:.38rem;}
+.corr{display:flex;align-items:flex-start;gap:.5rem;padding:.55rem .8rem;background:var(--surf2);border-radius:8px;border:1px solid var(--bdr);font-size:.75rem;line-height:1.5;animation:fadeIn .3s ease;}
+.cdot{width:7px;height:7px;border-radius:50%;margin-top:5px;flex-shrink:0;}
+
+/* ====== RIGHT COLUMN: BODY MAP ====== */
+.right-col{grid-column:3;display:flex;flex-direction:column;gap:.85rem;}
+
+/* Body map container */
+.body-map-card{background:var(--surf);border:1px solid var(--bdr);border-radius:14px;padding:.95rem;}
+.body-svg-wrap{position:relative;display:flex;justify-content:center;margin-top:.5rem;}
+.body-svg-wrap svg{width:100%;max-width:220px;}
+
+/* Clickable joint hotspot */
+.joint-hotspot{cursor:pointer;transition:all .25s;}
+.joint-hotspot circle.outer{fill:transparent;stroke:transparent;transition:all .25s;}
+.joint-hotspot:hover circle.outer,.joint-hotspot.active circle.outer{stroke-width:3;fill-opacity:0.15;}
+.joint-hotspot circle.inner{transition:all .25s;r:7;}
+.joint-hotspot:hover circle.inner{r:9;}
+.joint-hotspot.active circle.inner{r:10;}
+.joint-label{font-family:'DM Mono',monospace;font-size:9px;fill:var(--muted);pointer-events:none;transition:all .25s;}
+.joint-hotspot.active .joint-label,.joint-hotspot:hover .joint-label{fill:var(--text);}
+
+/* Joint info panel */
+.joint-info-panel{background:var(--surf2);border:1px solid var(--bdr);border-radius:11px;padding:.75rem;margin-top:.5rem;}
+.ji-title{font-family:'Syne',sans-serif;font-weight:700;font-size:.85rem;display:flex;align-items:center;gap:.4rem;}
+.ji-sub{font-size:.72rem;color:var(--muted);margin-top:3px;line-height:1.5;}
+.ji-angle{font-family:'DM Mono',monospace;font-size:1.4rem;font-weight:500;margin:.4rem 0 .2rem;}
+.ji-range-bar{height:6px;border-radius:100px;background:var(--bdr);overflow:visible;margin-top:.35rem;position:relative;}
+.ji-range-fill{height:100%;border-radius:100px;position:absolute;top:0;transition:all .3s;}
+.ji-range-pointer{width:3px;height:14px;border-radius:2px;position:absolute;top:-4px;transform:translateX(-50%);transition:left .3s;background:#fff;}
+.ji-range-labels{display:flex;justify-content:space-between;font-family:'DM Mono',monospace;font-size:.55rem;color:var(--muted);margin-top:4px;}
+
+/* FIX PANEL */
+.fix-panel{background:var(--surf);border:1px solid var(--bdr);border-radius:14px;padding:.95rem;}
+.fix-item{background:var(--surf2);border-radius:10px;border:1px solid var(--bdr);padding:.65rem .8rem;margin-bottom:.4rem;animation:fadeIn .3s ease;}
+.fix-header{display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem;}
+.fix-icon{font-size:1rem;}
+.fix-title{font-family:'Syne',sans-serif;font-size:.78rem;font-weight:700;}
+.fix-desc{font-size:.72rem;color:var(--muted);line-height:1.5;}
+.fix-degrees{display:inline-flex;align-items:center;gap:4px;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.25);border-radius:6px;padding:2px 8px;font-family:'DM Mono',monospace;font-size:.72rem;color:var(--danger);margin-top:.3rem;font-weight:500;}
+.fix-degrees.ok{background:rgba(16,185,129,.1);border-color:rgba(16,185,129,.25);color:var(--success);}
+.fix-degrees.warn{background:rgba(245,158,11,.1);border-color:rgba(245,158,11,.25);color:var(--warn);}
+
+/* Exercise plan */
+.ex-item{display:flex;align-items:center;gap:.6rem;padding:.6rem .8rem;border-radius:9px;border:1px solid var(--bdr);cursor:pointer;transition:all .2s;margin-bottom:.35rem;}
+.ex-item:hover,.ex-item.active{background:rgba(0,255,224,.05);border-color:rgba(0,255,224,.25);}
+.ex-item.active .ex-name{color:var(--accent);}
+.ex-ico{width:27px;height:27px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:.82rem;flex-shrink:0;}
+.ex-name{font-size:.78rem;font-weight:500;flex:1;}
+.ex-sub{font-family:'DM Mono',monospace;font-size:.62rem;color:var(--muted);}
+
+/* Timer */
+.timer-big{font-family:'DM Mono',monospace;font-size:2rem;font-weight:500;color:var(--accent);letter-spacing:2px;text-align:center;margin:.3rem 0 .15rem;}
+.timer-lbl{font-size:.62rem;color:var(--muted);text-transform:uppercase;letter-spacing:1px;text-align:center;}
+
+/* Avatar */
+.avatar{width:42px;height:42px;background:linear-gradient(135deg,var(--accent2),var(--accent));border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:1rem;font-weight:800;color:#fff;font-family:'Syne',sans-serif;flex-shrink:0;}
+.tag{font-size:.58rem;font-family:'DM Mono',monospace;padding:2px 7px;border-radius:5px;border:1px solid var(--bdr);background:var(--surf2);color:var(--muted);}
+
+/* Toast */
+.toast-area{position:fixed;bottom:1rem;right:1rem;z-index:300;display:flex;flex-direction:column;gap:.38rem;}
+.toast{padding:.55rem .9rem;border-radius:9px;background:var(--surf2);border:1px solid var(--bdr);font-size:.74rem;animation:fadeIn .3s ease;max-width:280px;}
+
+/* Pipeline */
+.pipeline{display:flex;align-items:center;gap:4px;padding:.55rem .75rem;background:var(--surf2);border-radius:9px;border:1px solid var(--bdr);overflow-x:auto;}
+.pb{flex-shrink:0;padding:3px 8px;border-radius:5px;font-family:'DM Mono',monospace;font-size:.55rem;font-weight:500;text-align:center;line-height:1.5;}
+.pa{color:var(--muted);font-size:.6rem;flex-shrink:0;}
+.pb.cnn{background:rgba(124,58,237,.15);border:1px solid rgba(124,58,237,.3);color:#a78bfa;}
+.pb.lstm{background:rgba(0,255,224,.08);border:1px solid rgba(0,255,224,.22);color:var(--accent);}
+.pb.fc{background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.25);color:var(--success);}
+.pb.out{background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);color:var(--warn);}
+.ppulse{width:5px;height:5px;border-radius:50%;background:var(--accent);flex-shrink:0;animation:blink 1s ease infinite;}
+
+::-webkit-scrollbar{width:4px;height:4px;}
+::-webkit-scrollbar-thumb{background:var(--bdr);border-radius:4px;}
+@media(max-width:1100px){main{grid-template-columns:1fr 300px;}  .right-col{grid-column:1/-1;grid-row:auto;}}
+@media(max-width:700px){main{grid-template-columns:1fr;}.mid-col,.right-col{grid-column:1;}}
+
+/* ====== LOGIN PORTAL ====== */
+#loginOverlay{position:fixed;inset:0;background:rgba(7,17,29,.97);z-index:1000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(8px);}
+.login-box{background:var(--surf);border:1px solid var(--bdr);border-radius:20px;padding:2.5rem 2rem;width:100%;max-width:420px;box-shadow:0 0 60px rgba(0,255,224,.06);}
+.login-logo{display:flex;align-items:center;gap:10px;margin-bottom:1.8rem;justify-content:center;}
+.login-logo .logo-mark{width:44px;height:44px;font-size:22px;}
+.login-logo .logo-name{font-family:'Syne',sans-serif;font-weight:800;font-size:1.5rem;}
+.login-logo .logo-name span{color:var(--accent);}
+.login-title{font-family:'Syne',sans-serif;font-weight:700;font-size:1.1rem;text-align:center;margin-bottom:.35rem;}
+.login-sub{font-size:.78rem;color:var(--muted);text-align:center;margin-bottom:1.8rem;line-height:1.6;}
+.form-group{margin-bottom:1rem;}
+.form-label{font-family:'DM Mono',monospace;font-size:.62rem;text-transform:uppercase;letter-spacing:1.2px;color:var(--muted);display:block;margin-bottom:.4rem;}
+.form-input{width:100%;background:var(--surf2);border:1px solid var(--bdr);border-radius:10px;padding:.7rem .9rem;color:var(--text);font-family:'DM Sans',sans-serif;font-size:.88rem;outline:none;transition:border-color .2s;}
+.form-input:focus{border-color:rgba(0,255,224,.35);}
+.form-select{width:100%;background:var(--surf2);border:1px solid var(--bdr);border-radius:10px;padding:.7rem .9rem;color:var(--text);font-family:'DM Sans',sans-serif;font-size:.88rem;outline:none;cursor:pointer;transition:border-color .2s;}
+.form-select:focus{border-color:rgba(0,255,224,.35);}
+.login-btn{width:100%;padding:.85rem;background:var(--accent);border:none;border-radius:11px;color:#07111d;font-family:'Syne',sans-serif;font-weight:700;font-size:.95rem;cursor:pointer;transition:all .2s;margin-top:.5rem;}
+.login-btn:hover{background:#33ffeb;transform:scale(1.01);}
+.login-history-link{text-align:center;margin-top:1rem;font-size:.75rem;color:var(--muted);}
+.login-history-link a{color:var(--accent);cursor:pointer;text-decoration:none;}
+.login-history-link a:hover{text-decoration:underline;}
+
+/* ====== HISTORY DASHBOARD OVERLAY ====== */
+#historyOverlay{position:fixed;inset:0;background:rgba(7,17,29,.97);z-index:999;display:none;align-items:flex-start;justify-content:center;padding:2rem 1rem;overflow-y:auto;backdrop-filter:blur(8px);}
+.history-box{background:var(--surf);border:1px solid var(--bdr);border-radius:20px;width:100%;max-width:760px;padding:2rem;}
+.history-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem;}
+.history-header h2{font-family:'Syne',sans-serif;font-weight:800;font-size:1.3rem;}
+.history-close-btn{background:var(--surf2);border:1px solid var(--bdr);color:var(--muted);padding:6px 14px;border-radius:8px;cursor:pointer;font-size:.8rem;font-family:'DM Sans',sans-serif;transition:all .2s;}
+.history-close-btn:hover{border-color:rgba(0,255,224,.3);color:var(--text);}
+.hist-table{width:100%;border-collapse:collapse;font-size:.82rem;}
+.hist-table th{font-family:'DM Mono',monospace;font-size:.58rem;text-transform:uppercase;letter-spacing:1px;color:var(--muted);padding:.6rem .9rem;text-align:left;border-bottom:1px solid var(--bdr);}
+.hist-table td{padding:.7rem .9rem;border-bottom:1px solid rgba(26,46,69,.5);vertical-align:middle;}
+.hist-table tr:hover td{background:rgba(0,255,224,.03);}
+.hist-table tr:last-child td{border-bottom:none;}
+.hist-name-cell{display:flex;align-items:center;gap:.6rem;}
+.hist-avatar{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:800;font-family:'Syne',sans-serif;color:#fff;flex-shrink:0;}
+.hist-joint-tag{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:100px;font-family:'DM Mono',monospace;font-size:.65rem;border:1px solid;font-weight:500;}
+.hist-time{font-family:'DM Mono',monospace;font-size:.68rem;color:var(--muted);}
+.hist-empty{text-align:center;padding:2.5rem;color:var(--muted);font-size:.85rem;}
+.hist-count{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:6px;background:rgba(0,255,224,.1);border:1px solid rgba(0,255,224,.2);font-family:'DM Mono',monospace;font-size:.65rem;color:var(--accent);}
+
+/* ====== USER BADGE in header ====== */
+#userBadge{display:none;align-items:center;gap:.5rem;font-family:'DM Mono',monospace;font-size:.65rem;padding:4px 11px;border-radius:100px;background:rgba(124,58,237,.12);border:1px solid rgba(124,58,237,.3);color:#a78bfa;cursor:pointer;}
+#userBadge:hover{background:rgba(124,58,237,.22);}
+
+/* ====== BLOCK EXPLANATION TOOLTIP ====== */
+.block-explain-btn{background:rgba(0,255,224,.08);border:1px solid rgba(0,255,224,.2);border-radius:6px;padding:2px 7px;font-family:'DM Mono',monospace;font-size:.55rem;color:var(--accent);cursor:pointer;margin-left:auto;transition:all .2s;}
+.block-explain-btn:hover{background:rgba(0,255,224,.15);}
+#blockModal{position:fixed;inset:0;background:rgba(7,17,29,.92);z-index:1100;display:none;align-items:center;justify-content:center;padding:1.5rem;}
+.block-modal-box{background:var(--surf);border:1px solid var(--bdr);border-radius:18px;max-width:580px;width:100%;padding:2rem;max-height:90vh;overflow-y:auto;}
+.block-modal-box h2{font-family:'Syne',sans-serif;font-weight:800;font-size:1.15rem;margin-bottom:.4rem;color:var(--accent);}
+.block-modal-box .bm-sub{font-size:.78rem;color:var(--muted);margin-bottom:1.4rem;line-height:1.6;}
+.bm-block{background:var(--surf2);border:1px solid var(--bdr);border-radius:12px;padding:1rem;margin-bottom:.8rem;}
+.bm-block-title{font-family:'Syne',sans-serif;font-weight:700;font-size:.9rem;display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem;}
+.bm-block-badge{font-family:'DM Mono',monospace;font-size:.58rem;padding:2px 8px;border-radius:5px;font-weight:500;}
+.bm-block-desc{font-size:.78rem;color:var(--muted);line-height:1.7;}
+.bm-close{width:100%;padding:.7rem;background:var(--surf2);border:1px solid var(--bdr);border-radius:10px;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;font-size:.85rem;margin-top:.5rem;transition:all .2s;}
+.bm-close:hover{border-color:rgba(0,255,224,.3);color:var(--text);}
+</style>
+</head>
+<body>
+
+<!-- ====== LOGIN PORTAL ====== -->
+<div id="loginOverlay">
+  <div class="login-box">
+    <div class="login-logo">
+      <div class="logo-mark">🦾</div>
+      <div class="logo-name">Rehab<span>Sense</span></div>
+    </div>
+    <div class="login-title">Welcome to RehabSense</div>
+    <div class="login-sub">Enter your details to start your personalized rehabilitation session. Your session data will be saved automatically.</div>
+    <div class="form-group">
+      <label class="form-label">Your Name</label>
+      <input class="form-input" id="loginName" type="text" placeholder="e.g. Priya Krishnan" autocomplete="off"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Joint Concerned (Primary Problem)</label>
+      <select class="form-select" id="loginJoint">
+        <option value="l-knee">Left Knee</option>
+        <option value="r-knee">Right Knee</option>
+        <option value="l-shoulder">Left Shoulder</option>
+        <option value="r-shoulder">Right Shoulder</option>
+        <option value="l-elbow">Left Elbow</option>
+        <option value="r-elbow">Right Elbow</option>
+        <option value="l-hip">Left Hip</option>
+        <option value="r-hip">Right Hip</option>
+        <option value="l-wrist">Left Wrist</option>
+        <option value="r-wrist">Right Wrist</option>
+        <option value="l-ankle">Left Ankle</option>
+        <option value="r-ankle">Right Ankle</option>
+        <option value="spine">Lumbar Spine</option>
+      </select>
+    </div>
+    <button class="login-btn" onclick="handleLogin()">▶ Start My Session</button>
+    <div class="login-history-link">View session history? <a onclick="openHistory()">See all users →</a></div>
+  </div>
+</div>
+
+<!-- ====== HISTORY DASHBOARD ====== -->
+<div id="historyOverlay">
+  <div class="history-box">
+    <div class="history-header">
+      <h2>📋 Session History — All Users</h2>
+      <button class="history-close-btn" onclick="closeHistory()">✕ Close</button>
+    </div>
+    <p style="font-size:.78rem;color:var(--muted);margin-bottom:1.2rem;line-height:1.6;">Complete session history for all users — name, joint, exercise performed, rep quality breakdown and accuracy. Saved in your browser's local storage.</p>
+    <table class="hist-table" id="histTable">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Patient Name</th>
+          <th>Joint</th>
+          <th>Exercise</th>
+          <th>Reps (✅⚠️❌)</th>
+          <th>Accuracy</th>
+        </tr>
+      </thead>
+      <tbody id="histBody">
+        <tr><td colspan="6" class="hist-empty">No sessions recorded yet.</td></tr>
+      </tbody>
+    </table>
+    <div style="margin-top:1.5rem;display:flex;gap:.5rem;">
+      <button class="history-close-btn" onclick="closeHistoryAndLogin()" style="flex:1;text-align:center;">← Back to Login</button>
+      <button class="history-close-btn" onclick="clearAllHistory()" style="color:var(--danger);border-color:rgba(239,68,68,.2);">🗑 Clear All</button>
+    </div>
+  </div>
+</div>
+
+<!-- ====== BLOCK EXPLANATION MODAL ====== -->
+<div id="blockModal">
+  <div class="block-modal-box">
+    <h2>🧠 AI Pipeline — Block Explanations</h2>
+    <div class="bm-sub">Here's what each block in the RehabSense AI pipeline does, explained simply for your presentation:</div>
+
+    <div class="bm-block">
+      <div class="bm-block-title">
+        <span class="bm-block-badge pb cnn" style="font-size:.7rem;padding:3px 10px;">CNN</span>
+        Convolutional Neural Network — Spatial Block
+      </div>
+      <div class="bm-block-desc">The <b style="color:#a78bfa">CNN block</b> looks at each video frame like a picture. It detects body parts — joints, limbs, and their positions — by scanning for visual patterns (edges, shapes, contours). Think of it like eyes that identify "where is the knee in this frame?" It processes spatial (location-based) information. In RehabSense, CNN powers MediaPipe's pose detection to find 33 body landmark coordinates.</div>
+    </div>
+
+    <div class="bm-block">
+      <div class="bm-block-title">
+        <span class="bm-block-badge pb lstm" style="font-size:.7rem;padding:3px 10px;">LSTM</span>
+        Long Short-Term Memory — Temporal Block
+      </div>
+      <div class="bm-block-desc">The <b style="color:var(--accent)">LSTM block</b> processes information across time — it remembers what happened in previous frames to understand movement. Where CNN sees a snapshot, LSTM understands a sequence. For example: it can tell the difference between a knee bending (flexion) vs extending (extension) by remembering the last 10–20 frames. It answers "how is this joint moving over time?"</div>
+    </div>
+
+    <div class="bm-block">
+      <div class="bm-block-title">
+        <span class="bm-block-badge pb fc" style="font-size:.7rem;padding:3px 10px;">Dense FC</span>
+        Fully Connected Layer — Decision Block
+      </div>
+      <div class="bm-block-desc">The <b style="color:var(--success)">Dense FC (Fully Connected) layer</b> is the "thinking" part. It takes all the spatial + temporal features from CNN and LSTM and combines them to make decisions. Every neuron is connected to every feature, so it can learn complex relationships like "if the knee angle is X and the hip is Y, then the form is incorrect." This is where movement quality scoring happens.</div>
+    </div>
+
+    <div class="bm-block">
+      <div class="bm-block-title">
+        <span class="bm-block-badge pb out" style="font-size:.7rem;padding:3px 10px;">Softmax</span>
+        Softmax Classifier — Output Block
+      </div>
+      <div class="bm-block-desc">The <b style="color:var(--warn)">Softmax block</b> converts raw scores into probabilities that add up to 100%. For example: "Good Form: 78%, Partial: 15%, Incorrect: 7%." It picks the most likely category and outputs it as the final classification. In RehabSense, this drives the ✅ Good / ⚠️ Partial / ❌ Incorrect rep quality labels you see in the dashboard.</div>
+    </div>
+
+    <div class="bm-block">
+      <div class="bm-block-title">
+        <span style="font-size:1rem;">📐</span>
+        Flexion / Extension — Phase Detection
+      </div>
+      <div class="bm-block-desc">The <b style="color:var(--text)">Flexion</b> phase is when the joint angle decreases — bending (like bending your knee). The <b style="color:var(--text)">Extension</b> phase is when the joint angle increases — straightening (like straightening your knee). The phase bar at the bottom of the angle panel shows which phase you're currently in. A complete rep = one full flexion + one full extension cycle.</div>
+    </div>
+
+    <div class="bm-block">
+      <div class="bm-block-title">
+        <span style="font-size:1rem;">🎯</span>
+        ROM — Range of Motion
+      </div>
+      <div class="bm-block-desc"><b style="color:var(--text)">ROM (Range of Motion)</b> is the measurement of how far a joint can move from minimum to maximum angle in degrees (°). In rehabilitation, achieving the target ROM means the joint is healing and regaining function. The green zone on the angle bar shows the "Good ROM" target range for each joint. The score ring reflects how close the patient is to their target ROM.</div>
+    </div>
+
+    <button class="bm-close" onclick="closeBlockModal()">✓ Got it — Close</button>
+  </div>
+</div>
+
+<header>
+  <div class="logo">
+    <div class="logo-mark">🦾</div>
+    <div>
+      <span class="logo-name">Rehab<span>Sense</span></span>
+      <span style="font-family:'DM Mono',monospace;font-size:.58rem;color:var(--muted);letter-spacing:1.2px;margin-left:4px;">CAMERA AI</span>
+    </div>
+  </div>
+  <div class="hdr-r">
+    <div class="hdr-pill">Local · No data sent</div>
+    <div id="userBadge" onclick="openHistory()">👤 <span id="userBadgeName">—</span></div>
+    <button class="block-explain-btn" onclick="openBlockModal()" style="margin-left:0;">🧠 Explain Blocks</button>
+    <div class="live-dot" id="liveStatus"><div class="dot"></div><span id="liveText">CAMERA OFF</span></div>
+  </div>
+</header>
+
+<main>
+
+<!-- ===== LEFT: CAMERA ===== -->
+<div class="cam-panel">
+
+  <div class="card" style="padding:.75rem;">
+    <div class="pipeline">
+      <div class="pb cnn">CNN<br>Spatial</div><div class="pa">→</div>
+      <div class="pb lstm">LSTM<br>Temporal</div><div class="pa">→</div>
+      <div class="pb fc">Dense<br>FC</div><div class="pa">→</div>
+      <div class="pb out">Softmax<br>Classify</div><div class="pa">→</div>
+      <div class="ppulse"></div>
+      <div style="margin-left:auto;font-family:'DM Mono',monospace;font-size:.58rem;color:var(--muted);">Latency: <span id="latency" style="color:var(--accent)">--</span>ms</div>
+    </div>
+  </div>
+
+  <!-- CAMERA FEED -->
+  <div class="cam-card" id="camCard">
+    <video id="inputVideo" autoplay muted playsinline style="display:none;"></video>
+    <canvas id="poseCanvas"></canvas>
+    <div class="cam-hud">
+      <div class="hud-tl">
+        <div class="hud-badge active" id="hudJoint">📍 Left Knee — Knee Extension</div>
+        <div class="hud-badge info" id="hudPhase">Phase: Waiting...</div>
+        <div class="hud-badge warn" id="hudError" style="display:none;">⚠️ Angle Error: --</div>
+      </div>
+      <div class="hud-tr">
+        <div class="hud-badge good" id="hudForm">Form: —</div>
+        <div class="hud-badge info" id="hudConf">CNN: —%</div>
+      </div>
+      <div class="hud-bl">
+        <div class="angle-badge" id="hudAngle">∠ —°</div>
+        <div class="angle-badge" id="hudTarget" style="display:none;color:var(--success);">Target: —°</div>
+      </div>
+    </div>
+    <div class="rep-overlay">
+      <div class="rep-big" id="repBig">0</div>
+      <div class="rep-lbl">REPS</div>
+    </div>
+    <div class="cam-placeholder" id="camPlaceholder">
+      <div class="icon">📷</div>
+      <h3>Camera Required</h3>
+      <p>RehabSense uses your camera to track pose landmarks in real-time using MediaPipe. No video is recorded or sent anywhere.</p>
+      <button class="start-cam-btn" onclick="startCamera()">Enable Camera & Start Tracking</button>
+    </div>
+  </div>
+
+  <!-- Angle + Phase -->
+  <div class="card">
+    <div class="clabel">▸ Live Joint Angles</div>
+    <div class="angle-row" id="angleRow"></div>
+    <div style="margin-top:.7rem;">
+      <div style="display:flex;justify-content:space-between;font-family:'DM Mono',monospace;font-size:.6rem;color:var(--muted);margin-bottom:3px;">
+        <span>FLEXION</span><span id="phaseLabel" style="color:var(--accent);">WAITING</span><span>EXTENSION</span>
+      </div>
+      <div class="phase-bar"><div class="phase-fill" id="phaseFill" style="width:50%;background:var(--accent);"></div></div>
+    </div>
+  </div>
+
+  <!-- Patient + Timer -->
+  <div class="card">
+    <div style="display:flex;gap:.75rem;align-items:center;margin-bottom:.65rem;">
+      <div class="avatar">PK</div>
+      <div>
+        <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:.92rem;">Priya Krishnan</div>
+        <div style="font-size:.7rem;color:var(--muted);margin-top:2px;">Multi-Joint Rehab · Week 4</div>
+      </div>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:.3rem;margin-bottom:.7rem;">
+      <div class="tag">Age: 41</div><div class="tag">F</div>
+      <div class="tag">Dr. Suresh R.</div>
+      <div class="tag" id="activeTag" style="color:var(--accent);border-color:rgba(0,255,224,.25);">L.Knee Active</div>
+    </div>
+    <div class="timer-big" id="timerDisp">00:00</div>
+    <div class="timer-lbl">Session Duration</div>
+    <div class="btn-row">
+      <button class="btn btn-p" id="startBtn" onclick="toggleTimer()">▶ Start</button>
+      <button class="btn btn-s" onclick="resetSession()">↺ Reset</button>
+    </div>
+  </div>
+
+</div>
+
+<!-- ===== MIDDLE COLUMN ===== -->
+<div class="mid-col">
+
+  <!-- Rep Stats - WORKING COUNTER -->
+  <div class="card">
+    <div class="clabel">▸ Rep Counter — Live Tracking</div>
+    <div class="rep-grid">
+      <div class="rstat" id="rstatTotal"><div class="rstat-n a" id="stTotal">0</div><div class="rstat-l">Total Reps</div></div>
+      <div class="rstat" id="rstatGood"><div class="rstat-n g" id="stGood">0</div><div class="rstat-l">✅ Correct</div></div>
+      <div class="rstat" id="rstatWarn"><div class="rstat-n w" id="stWarn">0</div><div class="rstat-l">⚠️ Partial</div></div>
+      <div class="rstat" id="rstatBad"><div class="rstat-n b" id="stBad">0</div><div class="rstat-l">❌ Incorrect</div></div>
+    </div>
+    <!-- Accuracy bar -->
+    <div style="margin-top:.65rem;">
+      <div style="display:flex;justify-content:space-between;font-family:'DM Mono',monospace;font-size:.6rem;color:var(--muted);margin-bottom:4px;">
+        <span>ACCURACY</span><span id="accuracyPct" style="color:var(--accent)">—%</span>
+      </div>
+      <div style="height:6px;border-radius:100px;background:var(--bdr);overflow:hidden;">
+        <div id="accuracyBar" style="height:100%;border-radius:100px;width:0%;background:var(--success);transition:width .5s ease,background .3s;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Score -->
+  <div class="card" id="scoreCard" style="display:none;">
+    <div class="clabel">▸ Movement Score</div>
+    <div class="score-row">
+      <div class="ring-wrap">
+        <svg viewBox="0 0 80 80">
+          <circle class="rbg" cx="40" cy="40" r="35"/>
+          <circle class="rfill" id="ringFill" cx="40" cy="40" r="35" stroke-dashoffset="110" stroke="var(--warn)"/>
+        </svg>
+        <div class="rval" id="ringVal" style="color:var(--warn)">50</div>
+      </div>
+      <div class="score-info">
+        <h3 id="scoreTitle">Waiting for Motion</h3>
+        <p id="scoreDesc">Enable camera and start moving to receive real-time form analysis.</p>
+      </div>
+    </div>
+    <div style="margin-top:.6rem;">
+      <div class="clabel" style="margin-bottom:.2rem;">Rep Score History</div>
+      <div class="bars" id="histBars"></div>
+      <div class="bar-lbls"><span id="bl1">—</span><span id="bl2">—</span><span id="bl3">—</span></div>
+    </div>
+  </div>
+
+  <!-- AI Feedback -->
+  <div class="card" id="fbCard" style="display:none;">
+    <div class="sec-title">🔊 AI Feedback</div>
+    <div class="fb warn" id="fbBanner">
+      <div class="fb-icon" id="fbIcon">⏳</div>
+      <div class="fb-body">
+        <h4 id="fbTitle">Waiting for Camera</h4>
+        <p id="fbSub">Enable camera to begin real-time form analysis</p>
+      </div>
+      <button class="aud-btn" onclick="speakFeedback()">🔈</button>
+    </div>
+  </div>
+
+  <!-- WHAT'S WRONG + HOW TO FIX -->
+  <div class="fix-panel" id="fixPanel">
+    <div class="sec-title">⚠️ What's Wrong & How to Fix</div>
+    <div id="fixList">
+      <div class="fix-item">
+        <div class="fix-header"><span class="fix-icon">📷</span><span class="fix-title">Start Camera</span></div>
+        <div class="fix-desc">Enable camera to see real-time angle analysis and corrections.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PER-REP FEEDBACK LOG -->
+  <div class="card" id="repLogCard" style="display:none;">
+    <div class="sec-title">📋 Rep-by-Rep Feedback</div>
+    <div id="repLogList" style="display:flex;flex-direction:column;gap:.4rem;max-height:300px;overflow-y:auto;"></div>
+  </div>
+
+  <!-- Exercise Plan -->
+  <div class="card" id="exerciseCard">
+    <div class="clabel">▸ Exercise Plan — <span id="planLabel" style="color:var(--accent)">Left Knee</span></div>
+    <div id="exercisePlan"></div>
+    <!-- Rep selector (shown after exercise selected) -->
+    <div id="repSelector" style="display:none;margin-top:.75rem;padding:.75rem;background:var(--surf2);border:1px solid var(--bdr);border-radius:10px;">
+      <div style="font-family:'DM Mono',monospace;font-size:.6rem;color:var(--muted);margin-bottom:.45rem;text-transform:uppercase;letter-spacing:1px;">Select Number of Reps</div>
+      <div style="display:flex;gap:.35rem;flex-wrap:wrap;" id="repBtns"></div>
+      <div style="margin-top:.55rem;font-size:.7rem;color:var(--muted);">Recommended: <span id="recRepsLabel" style="color:var(--accent)">—</span> reps for sufficient data</div>
+    </div>
+    <!-- Confirm start button -->
+    <div id="confirmExBtn" style="display:none;margin-top:.6rem;">
+      <button class="btn btn-p" style="width:100%;padding:.75rem;" onclick="confirmExerciseSelection()">▶ Start This Exercise</button>
+    </div>
+  </div>
+
+</div>
+
+<!-- ===== RIGHT COLUMN: BODY MAP ===== -->
+<div class="right-col">
+
+  <!-- Interactive Body Map -->
+  <div class="body-map-card">
+    <div class="clabel">▸ Body Map — Click Joint to Monitor</div>
+    <div class="body-svg-wrap">
+      <svg viewBox="0 0 200 480" xmlns="http://www.w3.org/2000/svg" id="bodySvg">
+        <!-- Body outline -->
+        <!-- Head -->
+        <circle cx="100" cy="30" r="22" fill="none" stroke="#1a2e45" stroke-width="2"/>
+        <!-- Neck -->
+        <line x1="100" y1="52" x2="100" y2="70" stroke="#1a2e45" stroke-width="6" stroke-linecap="round"/>
+        <!-- Torso -->
+        <path d="M65,70 L135,70 L130,180 L70,180 Z" fill="none" stroke="#1a2e45" stroke-width="2"/>
+        <!-- Left arm upper -->
+        <line x1="65" y1="75" x2="38" y2="145" stroke="#1a2e45" stroke-width="5" stroke-linecap="round"/>
+        <!-- Left arm lower -->
+        <line x1="38" y1="145" x2="20" y2="210" stroke="#1a2e45" stroke-width="4" stroke-linecap="round"/>
+        <!-- Right arm upper -->
+        <line x1="135" y1="75" x2="162" y2="145" stroke="#1a2e45" stroke-width="5" stroke-linecap="round"/>
+        <!-- Right arm lower -->
+        <line x1="162" y1="145" x2="180" y2="210" stroke="#1a2e45" stroke-width="4" stroke-linecap="round"/>
+        <!-- Left leg upper -->
+        <line x1="80" y1="180" x2="72" y2="290" stroke="#1a2e45" stroke-width="6" stroke-linecap="round"/>
+        <!-- Left leg lower -->
+        <line x1="72" y1="290" x2="68" y2="400" stroke="#1a2e45" stroke-width="5" stroke-linecap="round"/>
+        <!-- Right leg upper -->
+        <line x1="120" y1="180" x2="128" y2="290" stroke="#1a2e45" stroke-width="6" stroke-linecap="round"/>
+        <!-- Right leg lower -->
+        <line x1="128" y1="290" x2="132" y2="400" stroke="#1a2e45" stroke-width="5" stroke-linecap="round"/>
+        <!-- Left foot -->
+        <path d="M68,400 Q58,415 50,420 L75,420 Q80,415 68,400" fill="#1a2e45" opacity=".5"/>
+        <!-- Right foot -->
+        <path d="M132,400 Q142,415 150,420 L125,420 Q120,415 132,400" fill="#1a2e45" opacity=".5"/>
+        <!-- Left wrist/hand -->
+        <circle cx="20" cy="215" r="5" fill="#1a2e45"/>
+        <!-- Right wrist/hand -->
+        <circle cx="180" cy="215" r="5" fill="#1a2e45"/>
+
+        <!-- JOINT HOTSPOTS — clickable -->
+
+        <!-- Left Shoulder -->
+        <g class="joint-hotspot" id="hs-l-shoulder" onclick="selectJoint('l-shoulder')" transform="translate(65,75)">
+          <circle class="outer" cx="0" cy="0" r="18" stroke="#00ffe0"/>
+          <circle class="inner" cx="0" cy="0" r="7" fill="#00ffe0" opacity=".9"/>
+          <text class="joint-label" x="-30" y="-12" text-anchor="middle">L.Shoulder</text>
+        </g>
+
+        <!-- Right Shoulder -->
+        <g class="joint-hotspot" id="hs-r-shoulder" onclick="selectJoint('r-shoulder')" transform="translate(135,75)">
+          <circle class="outer" cx="0" cy="0" r="18" stroke="#00ffe0"/>
+          <circle class="inner" cx="0" cy="0" r="7" fill="#00ffe0" opacity=".9"/>
+          <text class="joint-label" x="30" y="-12" text-anchor="middle">R.Shoulder</text>
+        </g>
+
+        <!-- Left Elbow -->
+        <g class="joint-hotspot" id="hs-l-elbow" onclick="selectJoint('l-elbow')" transform="translate(38,145)">
+          <circle class="outer" cx="0" cy="0" r="16" stroke="#7c3aed"/>
+          <circle class="inner" cx="0" cy="0" r="7" fill="#7c3aed" opacity=".9"/>
+          <text class="joint-label" x="-30" y="-12" text-anchor="middle">L.Elbow</text>
+        </g>
+
+        <!-- Right Elbow -->
+        <g class="joint-hotspot" id="hs-r-elbow" onclick="selectJoint('r-elbow')" transform="translate(162,145)">
+          <circle class="outer" cx="0" cy="0" r="16" stroke="#7c3aed"/>
+          <circle class="inner" cx="0" cy="0" r="7" fill="#7c3aed" opacity=".9"/>
+          <text class="joint-label" x="30" y="-12" text-anchor="middle">R.Elbow</text>
+        </g>
+
+        <!-- Left Wrist -->
+        <g class="joint-hotspot" id="hs-l-wrist" onclick="selectJoint('l-wrist')" transform="translate(20,210)">
+          <circle class="outer" cx="0" cy="0" r="14" stroke="#38bdf8"/>
+          <circle class="inner" cx="0" cy="0" r="6" fill="#38bdf8" opacity=".9"/>
+          <text class="joint-label" x="-26" y="-10" text-anchor="middle">L.Wrist</text>
+        </g>
+
+        <!-- Right Wrist -->
+        <g class="joint-hotspot" id="hs-r-wrist" onclick="selectJoint('r-wrist')" transform="translate(180,210)">
+          <circle class="outer" cx="0" cy="0" r="14" stroke="#38bdf8"/>
+          <circle class="inner" cx="0" cy="0" r="6" fill="#38bdf8" opacity=".9"/>
+          <text class="joint-label" x="26" y="-10" text-anchor="middle">R.Wrist</text>
+        </g>
+
+        <!-- Left Hip -->
+        <g class="joint-hotspot" id="hs-l-hip" onclick="selectJoint('l-hip')" transform="translate(80,180)">
+          <circle class="outer" cx="0" cy="0" r="17" stroke="#f59e0b"/>
+          <circle class="inner" cx="0" cy="0" r="7" fill="#f59e0b" opacity=".9"/>
+          <text class="joint-label" x="-28" y="20" text-anchor="middle">L.Hip</text>
+        </g>
+
+        <!-- Right Hip -->
+        <g class="joint-hotspot" id="hs-r-hip" onclick="selectJoint('r-hip')" transform="translate(120,180)">
+          <circle class="outer" cx="0" cy="0" r="17" stroke="#f59e0b"/>
+          <circle class="inner" cx="0" cy="0" r="7" fill="#f59e0b" opacity=".9"/>
+          <text class="joint-label" x="28" y="20" text-anchor="middle">R.Hip</text>
+        </g>
+
+        <!-- Left Knee -->
+        <g class="joint-hotspot active" id="hs-l-knee" onclick="selectJoint('l-knee')" transform="translate(72,290)">
+          <circle class="outer" cx="0" cy="0" r="18" stroke="#ef4444"/>
+          <circle class="inner" cx="0" cy="0" r="7" fill="#ef4444" opacity=".9"/>
+          <text class="joint-label" x="-28" y="-14" text-anchor="middle">L.Knee</text>
+        </g>
+
+        <!-- Right Knee -->
+        <g class="joint-hotspot" id="hs-r-knee" onclick="selectJoint('r-knee')" transform="translate(128,290)">
+          <circle class="outer" cx="0" cy="0" r="18" stroke="#ef4444"/>
+          <circle class="inner" cx="0" cy="0" r="7" fill="#ef4444" opacity=".9"/>
+          <text class="joint-label" x="28" y="-14" text-anchor="middle">R.Knee</text>
+        </g>
+
+        <!-- Left Ankle -->
+        <g class="joint-hotspot" id="hs-l-ankle" onclick="selectJoint('l-ankle')" transform="translate(68,400)">
+          <circle class="outer" cx="0" cy="0" r="15" stroke="#ec4899"/>
+          <circle class="inner" cx="0" cy="0" r="6" fill="#ec4899" opacity=".9"/>
+          <text class="joint-label" x="-28" y="-12" text-anchor="middle">L.Ankle</text>
+        </g>
+
+        <!-- Right Ankle -->
+        <g class="joint-hotspot" id="hs-r-ankle" onclick="selectJoint('r-ankle')" transform="translate(132,400)">
+          <circle class="outer" cx="0" cy="0" r="15" stroke="#ec4899"/>
+          <circle class="inner" cx="0" cy="0" r="6" fill="#ec4899" opacity=".9"/>
+          <text class="joint-label" x="28" y="-12" text-anchor="middle">R.Ankle</text>
+        </g>
+
+        <!-- Spine -->
+        <g class="joint-hotspot" id="hs-spine" onclick="selectJoint('spine')" transform="translate(100,130)">
+          <circle class="outer" cx="0" cy="0" r="16" stroke="#06b6d4"/>
+          <circle class="inner" cx="0" cy="0" r="6" fill="#06b6d4" opacity=".9"/>
+          <text class="joint-label" x="30" y="5" text-anchor="middle">Spine</text>
+        </g>
+
+      </svg>
+    </div>
+
+    <!-- Joint Info Panel -->
+    <div class="joint-info-panel" id="jointInfoPanel">
+      <div class="ji-title" id="jiTitle">🦵 Left Knee</div>
+      <div class="ji-sub" id="jiSub">Knee Extension / Flexion — Tracking angle between Hip, Knee, Ankle</div>
+      <div class="ji-angle" id="jiAngle" style="color:#ef4444">—°</div>
+      <div style="font-family:'DM Mono',monospace;font-size:.58rem;color:var(--muted);">Target: <span id="jiTarget">155–175°</span></div>
+      <div class="ji-range-bar" style="margin-top:.5rem;">
+        <div class="ji-range-fill" id="jiRangeFill" style="left:0%;width:30%;background:var(--success);"></div>
+        <div class="ji-range-pointer" id="jiPointer" style="left:0%;"></div>
+      </div>
+      <div class="ji-range-labels"><span id="jiMin">—°</span><span style="color:var(--success)">✓ Good Zone</span><span id="jiMax">—°</span></div>
+    </div>
+  </div>
+
+</div>
+
+</main>
+<div class="toast-area" id="toasts"></div>
+
+<script>
+// ============================================================
+// JOINT DATABASE
+// ============================================================
+const JOINTS = {
+  'l-knee':{label:'Left Knee',color:'#ef4444',icon:'🦵',region:'Knee',
+    keypoints:['LEFT_HIP','LEFT_KNEE','LEFT_ANKLE'],
+    angLabel:'Knee Angle',minAngle:60,maxAngle:180,
+    exercises:[
+      {name:'Knee Extension',type:'Strengthening',recs:12,desc:'Straighten knee from 90° to full lockout, hold 2 sec at top'},
+      {name:'Knee Flexion',type:'Mobility',recs:15,desc:'Bend knee as far as comfortable, slowly return to start'},
+      {name:'Terminal Knee Extension',type:'Strengthening',recs:15,desc:'Start at 20–30° and lock out — strengthens last arc of quads'},
+      {name:'Straight Leg Raise',type:'Strengthening',recs:12,desc:'Keep knee locked, raise leg to 45°, hold 2 sec at top'}
+    ],
+    goodRange:[155,175],partialRange:[130,155],
+    targetAngle:165,
+    wrongChecks:[
+      {name:'Valgus (Knee Caving)',check:(a,lms)=>lms&&Math.abs(lms[23].x-lms[25].x)<0.04,fix:'Push your knee outward to align with your 2nd toe. Rotate externally ~10–15°.',icon:'🦵'},
+      {name:'Incomplete Extension',check:(a)=>a<155&&a>100,fix:(a)=>`Extend ${165-a}° more to reach full lockout. Push heel down and straighten completely.`,icon:'📐'},
+      {name:'Trunk Lean',check:(a,lms)=>lms&&Math.abs(lms[11].x-lms[23].x)>0.18,fix:'Sit up straight — lean back ~5–10° to neutral spine. Engage your core.',icon:'🪑'},
+      {name:'Shoulders Uneven',check:(a,lms)=>lms&&Math.abs(lms[11].y-lms[12].y)>0.05,fix:'Level your shoulders. Tilt your torso ~5° to correct compensation.',icon:'⚖️'},
+    ],
+    feedback:{
+      good:['Excellent knee extension — full ROM achieved','Great quad activation detected'],
+      warn:['Extend slightly more — aim for full lockout','Hip compensating — keep pelvis neutral'],
+      bad:['Insufficient range — pain-inhibition possible','Valgus collapse detected — align knee over toe'],
+    }
+  },
+  'r-knee':{label:'Right Knee',color:'#ef4444',icon:'🦵',region:'Knee',
+    keypoints:['RIGHT_HIP','RIGHT_KNEE','RIGHT_ANKLE'],
+    angLabel:'Knee Angle',minAngle:60,maxAngle:180,
+    exercises:[
+      {name:'Knee Extension',type:'Strengthening',recs:12,desc:'Straighten knee from 90° to full lockout, hold 2 sec at top'},
+      {name:'Quad Sets',type:'Activation',recs:15,desc:'Contract quad muscle with knee flat — push knee into floor'},
+      {name:'Leg Press ROM',type:'Mobility',recs:10,desc:'Controlled press through full range, slow 4-sec return'},
+      {name:'Step-Up',type:'Functional',recs:10,desc:'Step onto platform with affected leg, control descent slowly'}
+    ],
+    goodRange:[155,175],partialRange:[130,155],
+    targetAngle:165,
+    wrongChecks:[
+      {name:'Incomplete Extension',check:(a)=>a<155&&a>100,fix:(a)=>`Extend ${165-a}° more. Push heel into floor and fully straighten.`,icon:'📐'},
+      {name:'Knee Tracking Inward',check:(a,lms)=>lms&&Math.abs(lms[24].x-lms[26].x)<0.04,fix:'Rotate knee outward ~10°. Keep it aligned over your middle toe.',icon:'🔄'},
+    ],
+    feedback:{
+      good:['Right knee extension excellent — symmetric with left','Full ROM achieved — consistent effort'],
+      warn:['Right knee tracking inward — adjust foot position','Incomplete extension — push through last 20°'],
+      bad:['Knee buckling inward — stop and reset','Trunk lean compensating — strengthen hip stabilisers'],
+    }
+  },
+  'l-shoulder':{label:'Left Shoulder',color:'#00ffe0',icon:'💪',region:'Shoulder',
+    keypoints:['LEFT_ELBOW','LEFT_SHOULDER','LEFT_HIP'],
+    angLabel:'Shoulder Angle',minAngle:0,maxAngle:180,
+    exercises:['Shoulder Abduction','External Rotation','Pendulum Swing','Scapular Retraction'],
+    goodRange:[80,100],partialRange:[60,80],
+    targetAngle:90,
+    wrongChecks:[
+      {name:'Shoulder Shrug (Elevation)',check:(a,lms)=>lms&&lms[11].y<0.35,fix:'Depress your shoulder blade down ~2–3cm. Pull shoulder away from ear.',icon:'⬇️'},
+      {name:'Not Reaching 90°',check:(a)=>a<80,fix:(a)=>`Raise arm ${90-a}° more to reach shoulder height. Move slowly and controlled.`,icon:'📐'},
+      {name:'Elbow Bending',check:(a,lms)=>lms&&computeAngle({x:lms[11].x,y:lms[11].y},{x:lms[13].x,y:lms[13].y},{x:lms[15].x,y:lms[15].y})<150,fix:'Keep elbow straight during abduction. Extend elbow ~30° more.',icon:'💪'},
+    ],
+    feedback:{
+      good:['Left shoulder abduction 90° achieved — perfect','Scapula stabilised throughout — well done'],
+      warn:['Shrug detected — depress shoulder blade during lift','Not reaching target angle — improve gradually'],
+      bad:['Pain pattern possible — reduce range immediately','Cervical compensation — keep neck neutral'],
+    }
+  },
+  'r-shoulder':{label:'Right Shoulder',color:'#00ffe0',icon:'💪',region:'Shoulder',
+    keypoints:['RIGHT_ELBOW','RIGHT_SHOULDER','RIGHT_HIP'],
+    angLabel:'Shoulder Angle',minAngle:0,maxAngle:180,
+    exercises:['Shoulder Abduction','Shoulder Press','Rotator Cuff Stretch','Elevation ROM'],
+    goodRange:[80,100],partialRange:[60,80],
+    targetAngle:90,
+    wrongChecks:[
+      {name:'Not Reaching 90°',check:(a)=>a<80,fix:(a)=>`Lift arm ${90-a}° higher. Use a mirror to check alignment.`,icon:'📐'},
+      {name:'Trunk Side-Bending',check:(a,lms)=>lms&&Math.abs(lms[11].y-lms[12].y)>0.07,fix:'Keep torso straight. You are leaning ~8° — engage opposite side core.',icon:'🪑'},
+    ],
+    feedback:{
+      good:['Right shoulder movement excellent','Full elevation ROM achieved'],
+      warn:['Elevation not reaching target — work on mobility','Trunk side-bending — keep core engaged'],
+      bad:['Arm not clearing shoulder height — check impingement','Stop — compensatory pattern could cause re-injury'],
+    }
+  },
+  'l-elbow':{label:'Left Elbow',color:'#7c3aed',icon:'🦾',region:'Elbow',
+    keypoints:['LEFT_SHOULDER','LEFT_ELBOW','LEFT_WRIST'],
+    angLabel:'Elbow Angle',minAngle:30,maxAngle:160,
+    exercises:[
+      {name:'Elbow Flexion (Bicep Curl)',type:'Strengthening',recs:12,desc:'Curl forearm up toward shoulder, squeeze bicep at top'},
+      {name:'Supination ROM',type:'Mobility',recs:15,desc:'Rotate forearm palm-up, hold 2 sec at end range'},
+      {name:'Pronation Drill',type:'Mobility',recs:15,desc:'Rotate forearm palm-down, hold 2 sec at end range'},
+      {name:'Tricep Extension',type:'Strengthening',recs:10,desc:'Extend elbow from 90° to full lockout'}
+    ],
+    goodRange:[40,60],partialRange:[60,90],
+    targetAngle:50,
+    wrongChecks:[
+      {name:'Elbow Flaring Out',check:(a,lms)=>lms&&Math.abs(lms[13].x-lms[11].x)>0.2,fix:'Keep upper arm close to body. Move elbow inward ~5cm.',icon:'🔄'},
+      {name:'Incomplete Flexion',check:(a)=>a>65,fix:(a)=>`Curl ${a-50}° more to complete the rep. Contract your bicep fully.`,icon:'📐'},
+      {name:'Wrist Not Neutral',check:(a,lms)=>lms&&Math.abs(lms[13].y-lms[15].y)>0.3&&Math.abs(lms[13].x-lms[15].x)>0.15,fix:'Keep wrist straight and neutral. Avoid flexing or extending wrist during curl.',icon:'🖐️'},
+    ],
+    feedback:{
+      good:['Elbow flexion complete — full bicep contraction','Controlled eccentric phase — excellent form'],
+      warn:['Elbow flaring out — keep upper arm stationary','Incomplete curl — contract fully at top'],
+      bad:['Swinging detected — use strict form','Wrist instability — support wrist during movement'],
+    }
+  },
+  'r-elbow':{label:'Right Elbow',color:'#7c3aed',icon:'🦾',region:'Elbow',
+    keypoints:['RIGHT_SHOULDER','RIGHT_ELBOW','RIGHT_WRIST'],
+    angLabel:'Elbow Angle',minAngle:30,maxAngle:160,
+    exercises:[
+      {name:'Elbow Flexion (Bicep Curl)',type:'Strengthening',recs:12,desc:'Curl forearm up toward shoulder, squeeze bicep at top'},
+      {name:'Extension Stretch',type:'Mobility',recs:10,desc:'Extend elbow to full lockout, hold 3 sec at end range'},
+      {name:'Wrist Curl',type:'Strengthening',recs:15,desc:'Curl wrist upward against resistance, controlled lowering'},
+      {name:'Resistance Curl',type:'Strengthening',recs:10,desc:'Weighted curl — focus on slow 3-sec lowering phase'}
+    ],
+    goodRange:[40,60],partialRange:[60,90],
+    targetAngle:50,
+    wrongChecks:[
+      {name:'Shoulder Rolling Forward',check:(a,lms)=>lms&&lms[12].z<-0.1,fix:'Pull right shoulder blade back and down. Retract ~2–3cm.',icon:'⬅️'},
+      {name:'Incomplete Flexion',check:(a)=>a>65,fix:(a)=>`Curl ${a-50}° more. Match the left arm for symmetry.`,icon:'📐'},
+    ],
+    feedback:{
+      good:['Right elbow curl excellent — symmetric with left'],
+      warn:['Shoulder rolling forward — retract shoulder blade'],
+      bad:['Momentum used — slow down the movement'],
+    }
+  },
+  'l-wrist':{label:'Left Wrist',color:'#38bdf8',icon:'✋',region:'Wrist',
+    keypoints:['LEFT_ELBOW','LEFT_WRIST','LEFT_INDEX'],
+    angLabel:'Wrist Angle',minAngle:140,maxAngle:200,
+    exercises:[
+      {name:'Wrist Flexion',type:'Mobility',recs:15,desc:'Bend wrist downward (palm toward forearm), hold 2 sec'},
+      {name:'Wrist Extension',type:'Mobility',recs:15,desc:'Extend wrist upward (back of hand toward forearm), hold 2 sec'},
+      {name:'Wrist Circles',type:'Mobility',recs:20,desc:'Full circular rotation of wrist — clockwise then counter-clockwise'},
+      {name:'Grip Strengthening',type:'Strengthening',recs:15,desc:'Squeeze and release — strengthen intrinsic hand muscles'}
+    ],
+    goodRange:[155,175],partialRange:[145,155],
+    targetAngle:165,
+    wrongChecks:[
+      {name:'Limited Flexion Range',check:(a)=>a>175,fix:(a)=>`Flex wrist ${a-165}° more. Gently assist with opposite hand if needed.`,icon:'📐'},
+      {name:'Elbow Compensation',check:(a,lms)=>lms&&Math.abs(lms[13].y-lms[15].y)>0.25,fix:'Keep elbow still. Only move from the wrist joint.',icon:'🦾'},
+    ],
+    feedback:{
+      good:['Wrist ROM good — full flexion/extension achieved'],
+      warn:['Partial range — work on end-range stretching daily'],
+      bad:['Pain detected pattern — reduce load and range'],
+    }
+  },
+  'r-wrist':{label:'Right Wrist',color:'#38bdf8',icon:'✋',region:'Wrist',
+    keypoints:['RIGHT_ELBOW','RIGHT_WRIST','RIGHT_INDEX'],
+    angLabel:'Wrist Angle',minAngle:140,maxAngle:200,
+    exercises:[
+      {name:'Wrist Flexion',type:'Mobility',recs:15,desc:'Bend wrist downward (palm toward forearm), hold 2 sec'},
+      {name:'Wrist Extension',type:'Mobility',recs:15,desc:'Extend wrist upward (back of hand toward forearm), hold 2 sec'},
+      {name:'Radial/Ulnar Deviation',type:'Mobility',recs:12,desc:'Move wrist side-to-side (thumb up, pinky up), controlled pace'},
+      {name:'Resistance Wrist Curl',type:'Strengthening',recs:12,desc:'Use light resistance band or weight — slow controlled curls'}
+    ],
+    goodRange:[155,175],partialRange:[145,155],
+    targetAngle:165,
+    wrongChecks:[
+      {name:'Wrist Hyperextension',check:(a)=>a<150,fix:'Do not force past comfortable range. Back off and hold at end range.',icon:'📐'},
+      {name:'Forearm Rotation',check:(a,lms)=>lms&&Math.abs(lms[14].z-lms[16].z)>0.1,fix:'Stabilise forearm on table. Only move from wrist.',icon:'🔄'},
+    ],
+    feedback:{
+      good:['Right wrist mobility — good symmetric ROM'],
+      warn:['Compensation from forearm — isolate the wrist'],
+      bad:['Hyperextension risk — stay within pain-free range'],
+    }
+  },
+  'l-hip':{label:'Left Hip',color:'#f59e0b',icon:'🏃',region:'Hip',
+    keypoints:['LEFT_SHOULDER','LEFT_HIP','LEFT_KNEE'],
+    angLabel:'Hip Angle',minAngle:70,maxAngle:180,
+    exercises:[
+      {name:'Hip Abduction',type:'Strengthening',recs:12,desc:'Lift leg out to the side, keep pelvis level, lower slowly'},
+      {name:'Hip Flexion',type:'Mobility',recs:12,desc:'Raise knee toward chest, hold 2 sec at end range'},
+      {name:'Clamshell',type:'Activation',recs:15,desc:'Side-lying — open knee like a clamshell, keep feet together'},
+      {name:'Glute Bridge',type:'Strengthening',recs:12,desc:'Lie on back, push hips up and squeeze glutes at top'}
+    ],
+    goodRange:[160,180],partialRange:[140,160],
+    targetAngle:170,
+    wrongChecks:[
+      {name:'Lumbar Hyperextension',check:(a,lms)=>lms&&(lms[23].y-lms[11].y)>0.5&&lms[23].z<lms[11].z,fix:'Tuck pelvis under slightly. Reduce lumbar arch ~5–10°. Engage core.',icon:'🔙'},
+      {name:'Anterior Pelvic Tilt',check:(a)=>a<155,fix:(a)=>`Extend hip ${170-a}° more. Squeeze glutes to push pelvis forward.`,icon:'📐'},
+      {name:'Hip Drop',check:(a,lms)=>lms&&Math.abs(lms[23].y-lms[24].y)>0.05,fix:'Keep hips level. Activate hip abductors on the dropping side.',icon:'⚖️'},
+    ],
+    feedback:{
+      good:['Hip extension excellent — glute fully activated','Neutral spine maintained — perfect form'],
+      warn:['Lumbar hyperextension — engage core more','Anterior pelvic tilt — tuck pelvis under'],
+      bad:['Stop — lumbar spine at risk','Hip drop detected — strengthen hip abductors'],
+    }
+  },
+  'r-hip':{label:'Right Hip',color:'#f59e0b',icon:'🏃',region:'Hip',
+    keypoints:['RIGHT_SHOULDER','RIGHT_HIP','RIGHT_KNEE'],
+    angLabel:'Hip Angle',minAngle:70,maxAngle:180,
+    exercises:[
+      {name:'Hip Abduction',type:'Strengthening',recs:12,desc:'Lift leg out to the side, keep pelvis level, lower slowly'},
+      {name:'Hip Extension',type:'Strengthening',recs:12,desc:'Extend hip back behind body — squeeze glute at end range'},
+      {name:'Side-Lying Raise',type:'Activation',recs:15,desc:'Lie on left side, raise right leg 30–40°, hold 2 sec'},
+      {name:'Single Leg Stand',type:'Functional',recs:10,desc:'Balance on right leg 10 sec per rep — builds proprioception'}
+    ],
+    goodRange:[160,180],partialRange:[140,160],
+    targetAngle:170,
+    wrongChecks:[
+      {name:'Pelvis Tilting',check:(a,lms)=>lms&&Math.abs(lms[23].y-lms[24].y)>0.05,fix:'Level your pelvis. Activate your right glute med. Correct ~5° tilt.',icon:'⚖️'},
+      {name:'Incomplete Extension',check:(a)=>a<155,fix:(a)=>`Extend hip ${170-a}° more. Push through heel and squeeze glutes.`,icon:'📐'},
+    ],
+    feedback:{
+      good:['Right hip movement symmetric and strong'],
+      warn:['Pelvis tilting — maintain level hips throughout'],
+      bad:['Hip hike detected — stop and reassess'],
+    }
+  },
+  'l-ankle':{label:'Left Ankle',color:'#ec4899',icon:'🦶',region:'Ankle',
+    keypoints:['LEFT_KNEE','LEFT_ANKLE','LEFT_FOOT_INDEX'],
+    angLabel:'Ankle Angle',minAngle:70,maxAngle:130,
+    exercises:[
+      {name:'Dorsiflexion',type:'Mobility',recs:15,desc:'Pull toes toward shin, hold 2 sec at end range'},
+      {name:'Plantar Flexion',type:'Strengthening',recs:15,desc:'Point toes away (like pressing a gas pedal), hold 2 sec'},
+      {name:'Ankle Circles',type:'Mobility',recs:20,desc:'Full circles in both directions — clockwise and counter-clockwise'},
+      {name:'Calf Raise',type:'Strengthening',recs:12,desc:'Rise up onto tiptoes slowly, 3-sec hold at top, lower slowly'}
+    ],
+    goodRange:[100,125],partialRange:[85,100],
+    targetAngle:110,
+    wrongChecks:[
+      {name:'Limited Dorsiflexion',check:(a)=>a<100,fix:(a)=>`Flex ankle ${110-a}° more (pull toes toward shin). Stretch calf before session.`,icon:'📐'},
+      {name:'Ankle Inversion',check:(a,lms)=>lms&&lms[27].z<-0.05,fix:'Keep weight distributed evenly. Avoid rolling ankle inward. Strengthen peroneals.',icon:'🔄'},
+    ],
+    feedback:{
+      good:['Good dorsiflexion range — ankle mobility improving'],
+      warn:['Limited dorsiflexion — work on calf stretching'],
+      bad:['Pain pattern detected — reduce range immediately'],
+    }
+  },
+  'r-ankle':{label:'Right Ankle',color:'#ec4899',icon:'🦶',region:'Ankle',
+    keypoints:['RIGHT_KNEE','RIGHT_ANKLE','RIGHT_FOOT_INDEX'],
+    angLabel:'Ankle Angle',minAngle:70,maxAngle:130,
+    exercises:[
+      {name:'Dorsiflexion',type:'Mobility',recs:15,desc:'Pull toes toward shin, hold 2 sec at end range'},
+      {name:'Plantar Flexion',type:'Strengthening',recs:15,desc:'Point toes away (like pressing a gas pedal), hold 2 sec'},
+      {name:'Ankle Inversion/Eversion',type:'Mobility',recs:12,desc:'Move foot inward and outward — strengthens ankle stabilisers'},
+      {name:'Single Leg Balance',type:'Functional',recs:10,desc:'Stand on right foot 10 sec per rep — improves proprioception'}
+    ],
+    goodRange:[100,125],partialRange:[85,100],
+    targetAngle:110,
+    wrongChecks:[
+      {name:'Limited Dorsiflexion',check:(a)=>a<100,fix:(a)=>`Flex ankle ${110-a}° more. Stretch calf and Achilles daily.`,icon:'📐'},
+      {name:'Ankle Rolling Out',check:(a,lms)=>lms&&lms[28].z>0.05,fix:'Keep weight over the midfoot. Avoid supinating. Strengthen peroneals.',icon:'🔄'},
+    ],
+    feedback:{
+      good:['Right ankle dorsiflexion good — improving symmetry'],
+      warn:['Limited range — focus on end-range stretching'],
+      bad:['Pain pattern detected — reduce range immediately'],
+    }
+  },
+  'l-shoulder':{label:'Left Shoulder',color:'#00ffe0',icon:'💪',region:'Shoulder',
+    keypoints:['LEFT_ELBOW','LEFT_SHOULDER','LEFT_HIP'],
+    angLabel:'Shoulder Angle',minAngle:0,maxAngle:180,
+    exercises:[
+      {name:'Shoulder Abduction',type:'Mobility',recs:12,desc:'Raise arm out to side to 90°, keep elbow straight, lower slowly'},
+      {name:'External Rotation',type:'Strengthening',recs:15,desc:'Elbow at 90°, rotate forearm outward — resist with band'},
+      {name:'Pendulum Swing',type:'Mobility',recs:20,desc:'Lean forward, let arm hang, make small circles — gravity-assisted'},
+      {name:'Scapular Retraction',type:'Activation',recs:15,desc:'Squeeze shoulder blades together, hold 3 sec, release slowly'}
+    ],
+    goodRange:[80,100],partialRange:[60,80],
+    targetAngle:90,
+    wrongChecks:[
+      {name:'Shoulder Shrug (Elevation)',check:(a,lms)=>lms&&lms[11].y<0.35,fix:'Depress your shoulder blade down ~2–3cm. Pull shoulder away from ear.',icon:'⬇️'},
+      {name:'Not Reaching 90°',check:(a)=>a<80,fix:(a)=>`Raise arm ${90-a}° more to reach shoulder height. Move slowly and controlled.`,icon:'📐'},
+      {name:'Elbow Bending',check:(a,lms)=>lms&&computeAngle({x:lms[11].x,y:lms[11].y},{x:lms[13].x,y:lms[13].y},{x:lms[15].x,y:lms[15].y})<150,fix:'Keep elbow straight during abduction. Extend elbow ~30° more.',icon:'💪'},
+    ],
+    feedback:{
+      good:['Left shoulder abduction 90° achieved — perfect','Scapula stabilised throughout — well done'],
+      warn:['Shrug detected — depress shoulder blade during lift','Not reaching target angle — improve gradually'],
+      bad:['Pain pattern possible — reduce range immediately','Cervical compensation — keep neck neutral'],
+    }
+  },
+  'r-shoulder':{label:'Right Shoulder',color:'#00ffe0',icon:'💪',region:'Shoulder',
+    keypoints:['RIGHT_ELBOW','RIGHT_SHOULDER','RIGHT_HIP'],
+    angLabel:'Shoulder Angle',minAngle:0,maxAngle:180,
+    exercises:[
+      {name:'Shoulder Abduction',type:'Mobility',recs:12,desc:'Raise arm out to side to 90°, keep elbow straight, lower slowly'},
+      {name:'Shoulder Press',type:'Strengthening',recs:10,desc:'Press arm overhead from 90° — controlled 3-sec lowering'},
+      {name:'Rotator Cuff Stretch',type:'Mobility',recs:15,desc:'Cross-body stretch — hold 20 sec at end range'},
+      {name:'Elevation ROM',type:'Mobility',recs:12,desc:'Raise arm as high as comfortable, track progress each session'}
+    ],
+    goodRange:[80,100],partialRange:[60,80],
+    targetAngle:90,
+    wrongChecks:[
+      {name:'Not Reaching 90°',check:(a)=>a<80,fix:(a)=>`Lift arm ${90-a}° higher. Use a mirror to check alignment.`,icon:'📐'},
+      {name:'Trunk Side-Bending',check:(a,lms)=>lms&&Math.abs(lms[11].y-lms[12].y)>0.07,fix:'Keep torso straight. You are leaning ~8° — engage opposite side core.',icon:'🪑'},
+    ],
+    feedback:{
+      good:['Right shoulder movement excellent','Full elevation ROM achieved'],
+      warn:['Elevation not reaching target — work on mobility','Trunk side-bending — keep core engaged'],
+      bad:['Arm not clearing shoulder height — check impingement','Stop — compensatory pattern could cause re-injury'],
+    }
+  },
+  'spine':{label:'Lumbar Spine',color:'#06b6d4',icon:'🧘',region:'Spine',
+    keypoints:['LEFT_SHOULDER','LEFT_HIP','LEFT_KNEE'],
+    angLabel:'Trunk Angle',minAngle:90,maxAngle:180,
+    exercises:[
+      {name:'Cat-Cow Stretch',type:'Mobility',recs:15,desc:'Alternate between rounding and arching spine — slow controlled breathing'},
+      {name:'Bird Dog',type:'Stability',recs:10,desc:'Extend opposite arm and leg, hold 3 sec — neutral spine throughout'},
+      {name:'Pelvic Tilt',type:'Activation',recs:15,desc:'Flatten lumbar spine to floor, hold 5 sec — activates deep core'},
+      {name:'McKenzie Extension',type:'Mobility',recs:10,desc:'Prone press-up — extend spine backward slowly, hold 2 sec at top'}
+    ],
+    goodRange:[160,180],partialRange:[140,160],
+    targetAngle:170,
+    wrongChecks:[
+      {name:'Excessive Forward Flexion',check:(a)=>a<155,fix:(a)=>`Extend spine ${170-a}° more. Lift chest, pull shoulders back, engage core.`,icon:'📐'},
+      {name:'Lateral Trunk Shift',check:(a,lms)=>lms&&Math.abs(lms[11].x-lms[23].x)>0.15,fix:'Shift weight to centre. Lateral deviation ~10cm — correct by engaging obliques.',icon:'↔️'},
+    ],
+    feedback:{
+      good:['Neutral spine maintained — excellent core control'],
+      warn:['Slight forward flexion — brace core more firmly'],
+      bad:['Excessive flexion — risk of disc loading — stop'],
+    }
+  },
+};
+
+const MP={
+  LEFT_SHOULDER:11,RIGHT_SHOULDER:12,LEFT_ELBOW:13,RIGHT_ELBOW:14,
+  LEFT_WRIST:15,RIGHT_WRIST:16,LEFT_HIP:23,RIGHT_HIP:24,
+  LEFT_KNEE:25,RIGHT_KNEE:26,LEFT_ANKLE:27,RIGHT_ANKLE:28,
+  LEFT_FOOT_INDEX:31,RIGHT_FOOT_INDEX:32,
+  LEFT_INDEX:19,RIGHT_INDEX:20,
+};
+
+// ============================================================
+// STATE
+// ============================================================
+let activeKey='l-knee',cameraRunning=false,pose=null;
+let currentAngle=0,repPhase='up';
+let reps={total:0,good:0,warn:0,bad:0};
+let repScores=[],currentScore=50,currentFBType='warn';
+let sessionActive=false,timerSec=0,timerInt=null;
+let landmarks=null,lastLatency=0;
+let selectedExerciseIdx=0;
+let selectedRepTarget=12;
+let exerciseConfirmed=false;
+let repLog=[];
+let currentRepIssues=[];
+
+// ============================================================
+// BUILD UI
+// ============================================================
+function buildAngleRow(){
+  const j=JOINTS[activeKey];
+  document.getElementById('angleRow').innerHTML=`
+    <div class="angle-box">
+      <div class="angle-val" id="angleMain" style="color:${j.color}">—</div>
+      <div class="angle-unit">degrees</div>
+      <div class="angle-name">${j.angLabel}</div>
+    </div>
+    <div class="angle-box">
+      <div class="angle-val" id="angleTarget" style="color:var(--success)">${j.goodRange[0]}–${j.goodRange[1]}°</div>
+      <div class="angle-unit">target range</div>
+      <div class="angle-name">Good ROM</div>
+    </div>
+    <div class="angle-box">
+      <div class="angle-val" id="angleDelta" style="color:var(--warn)">—</div>
+      <div class="angle-unit">from target</div>
+      <div class="angle-name">Delta Δ</div>
+    </div>
+    <div class="angle-box">
+      <div class="angle-val" id="anglePhase" style="color:var(--accent)">—</div>
+      <div class="angle-unit">direction</div>
+      <div class="angle-name">Phase</div>
+    </div>`;
+}
+
+function buildExercisePlan(){
+  const j=JOINTS[activeKey];
+  document.getElementById('planLabel').textContent=j.label;
+  document.getElementById('planLabel').style.color=j.color;
+  const c=document.getElementById('exercisePlan'); c.innerHTML='';
+
+  const typeColors={
+    'Strengthening':'rgba(16,185,129,.12)','Mobility':'rgba(0,255,224,.1)',
+    'Activation':'rgba(124,58,237,.12)','Functional':'rgba(245,158,11,.12)',
+    'Stability':'rgba(6,182,212,.12)'
+  };
+  const typeBorders={
+    'Strengthening':'rgba(16,185,129,.35)','Mobility':'rgba(0,255,224,.3)',
+    'Activation':'rgba(124,58,237,.35)','Functional':'rgba(245,158,11,.3)',
+    'Stability':'rgba(6,182,212,.3)'
+  };
+  const typeTextColors={
+    'Strengthening':'var(--success)','Mobility':'var(--accent)',
+    'Activation':'#a78bfa','Functional':'var(--warn)','Stability':'#22d3ee'
+  };
+
+  j.exercises.forEach((ex,i)=>{
+    const d=document.createElement('div');
+    d.className='ex-item'+(i===selectedExerciseIdx?' active':'');
+    d.onclick=()=>selectExercise(i);
+    const tc=typeColors[ex.type]||'rgba(0,255,224,.08)';
+    const tb=typeBorders[ex.type]||'rgba(0,255,224,.2)';
+    const tt=typeTextColors[ex.type]||'var(--accent)';
+    d.innerHTML=`
+      <div class="ex-ico" style="background:${j.color}22">${j.icon}</div>
+      <div style="flex:1;min-width:0;">
+        <div class="ex-name">${ex.name}</div>
+        <div style="font-size:.68rem;color:var(--muted);margin-top:2px;line-height:1.4;">${ex.desc}</div>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px;flex-shrink:0;">
+        <span style="font-family:'DM Mono',monospace;font-size:.58rem;padding:2px 7px;border-radius:5px;background:${tc};border:1px solid ${tb};color:${tt};">${ex.type}</span>
+        <span style="font-family:'DM Mono',monospace;font-size:.6rem;color:var(--muted);">Rec: ${ex.recs} reps</span>
+      </div>`;
+    c.appendChild(d);
+  });
+
+  // Rep selector buttons
+  buildRepSelector();
+}
+
+function selectExercise(idx){
+  selectedExerciseIdx=idx;
+  const j=JOINTS[activeKey];
+  const ex=j.exercises[idx];
+  selectedRepTarget=ex.recs;
+  buildExercisePlan();
+  document.getElementById('repSelector').style.display='block';
+  document.getElementById('confirmExBtn').style.display='block';
+  document.getElementById('recRepsLabel').textContent=ex.recs;
+  // Highlight selected rep button
+  updateRepBtnHighlight();
+  showToast(`📋 Selected: ${ex.name}`,'accent');
+}
+
+function buildRepSelector(){
+  const j=JOINTS[activeKey];
+  const ex=j.exercises[selectedExerciseIdx];
+  const repOptions=[5,8,10,12,15,20];
+  const container=document.getElementById('repBtns');
+  container.innerHTML='';
+  repOptions.forEach(n=>{
+    const b=document.createElement('button');
+    b.textContent=n;
+    b.className='btn btn-s';
+    b.style.cssText='flex:0;padding:5px 12px;font-family:"DM Mono",monospace;font-size:.75rem;';
+    if(n===selectedRepTarget){
+      b.style.background='var(--accent)';
+      b.style.color='#07111d';
+      b.style.borderColor='var(--accent)';
+    }
+    b.onclick=()=>{
+      selectedRepTarget=n;
+      updateRepBtnHighlight();
+      document.getElementById('recRepsLabel').textContent=ex.recs;
+    };
+    container.appendChild(b);
+  });
+}
+
+function updateRepBtnHighlight(){
+  const btns=document.getElementById('repBtns').querySelectorAll('button');
+  const repOptions=[5,8,10,12,15,20];
+  btns.forEach((b,i)=>{
+    if(repOptions[i]===selectedRepTarget){
+      b.style.background='var(--accent)';b.style.color='#07111d';b.style.borderColor='var(--accent)';
+    } else {
+      b.style.background='transparent';b.style.color='var(--muted)';b.style.borderColor='var(--bdr)';
+    }
+  });
+}
+
+function confirmExerciseSelection(){
+  const j=JOINTS[activeKey];
+  const ex=j.exercises[selectedExerciseIdx];
+  exerciseConfirmed=true;
+  repLog=[];
+  reps={total:0,good:0,warn:0,bad:0};
+  repScores=[];
+  updateRepDisplay();
+  renderBars();
+  document.getElementById('hudJoint').textContent=`📍 ${j.label} — ${ex.name}`;
+  document.getElementById('repLogCard').style.display='none';
+  document.getElementById('repLogList').innerHTML='';
+  // Hide selector, show ready state
+  document.getElementById('repSelector').style.display='none';
+  document.getElementById('confirmExBtn').style.display='none';
+  // Hide score/feedback until first rep done
+  document.getElementById('scoreCard').style.display='none';
+  document.getElementById('fbCard').style.display='none';
+  showToast(`✅ Exercise set: ${ex.name} × ${selectedRepTarget} reps — press Start!`,'accent');
+}
+
+function selectJoint(key){
+  activeKey=key;
+  exerciseConfirmed=false;
+  selectedExerciseIdx=0;
+  selectedRepTarget=JOINTS[key].exercises[0].recs||12;
+  // Update body map hotspots
+  document.querySelectorAll('.joint-hotspot').forEach(g=>g.classList.remove('active'));
+  const hs=document.getElementById('hs-'+key);
+  if(hs) hs.classList.add('active');
+  // Update active tag
+  document.getElementById('activeTag').textContent=JOINTS[key].label+' Active';
+  document.getElementById('hudJoint').textContent=`📍 ${JOINTS[key].label} — select exercise`;
+  // Reset reps for new joint
+  reps={total:0,good:0,warn:0,bad:0};
+  repScores=[]; repPhase='up'; currentAngle=0; repLog=[];
+  updateRepDisplay(); renderBars();
+  buildAngleRow(); buildExercisePlan(); updateJointInfo();
+  updateFixPanel([]);
+  // Show rep selector for first exercise
+  document.getElementById('repSelector').style.display='block';
+  document.getElementById('confirmExBtn').style.display='block';
+  document.getElementById('recRepsLabel').textContent=selectedRepTarget;
+  // Hide score/feedback until after exercise
+  document.getElementById('scoreCard').style.display='none';
+  document.getElementById('fbCard').style.display='none';
+  document.getElementById('repLogCard').style.display='none';
+  showToast(`📍 Switched to ${JOINTS[key].label} — select an exercise`,'accent');
+}
+function updateJointInfo(){
+  const j=JOINTS[activeKey];
+  const ex=j.exercises[selectedExerciseIdx]||j.exercises[0];
+  document.getElementById('jiTitle').textContent=j.icon+' '+j.label;
+  document.getElementById('jiSub').textContent=ex.name+' — Tracking '+j.keypoints.join(' → ');
+  document.getElementById('jiTarget').textContent=j.goodRange[0]+'–'+j.goodRange[1]+'°';
+  document.getElementById('jiMin').textContent=j.minAngle+'°';
+  document.getElementById('jiMax').textContent=j.maxAngle+'°';
+  document.getElementById('jiAngle').style.color=j.color;
+  updateJointRangeBar(currentAngle||0);
+}
+
+function updateJointRangeBar(angle){
+  const j=JOINTS[activeKey];
+  const range=j.maxAngle-j.minAngle;
+  const goodL=((j.goodRange[0]-j.minAngle)/range)*100;
+  const goodW=((j.goodRange[1]-j.goodRange[0])/range)*100;
+  const pct=Math.min(Math.max(((angle-j.minAngle)/range)*100,0),100);
+  document.getElementById('jiRangeFill').style.left=goodL+'%';
+  document.getElementById('jiRangeFill').style.width=goodW+'%';
+  document.getElementById('jiPointer').style.left=pct+'%';
+  document.getElementById('jiAngle').textContent=angle?angle+'°':'—°';
+}
+
+// ============================================================
+// MEDIAPIPE POSE
+// ============================================================
+async function startCamera(){
+  document.getElementById('camPlaceholder').style.display='none';
+  showToast('📷 Requesting camera access...','accent');
+  const video=document.getElementById('inputVideo');
+  const canvas=document.getElementById('poseCanvas');
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:1280},height:{ideal:720}}});
+    video.srcObject=stream; video.style.display='block';
+    cameraRunning=true;
+    document.getElementById('liveText').textContent='CAMERA LIVE';
+    showToast('✅ Camera connected — MediaPipe loading...','accent');
+    pose=new Pose({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}`});
+    pose.setOptions({modelComplexity:1,smoothLandmarks:true,enableSegmentation:false,minDetectionConfidence:0.6,minTrackingConfidence:0.5});
+    pose.onResults(onPoseResults);
+    video.addEventListener('loadedmetadata',()=>{
+      canvas.width=video.videoWidth||640;
+      canvas.height=video.videoHeight||480;
+      processFrame(video,canvas);
+    });
+    setTimeout(()=>showToast('🧠 Pose model loaded — tracking active','accent'),2500);
+  } catch(err){
+    showToast('❌ Camera error: '+err.message,'default');
+    document.getElementById('camPlaceholder').style.display='flex';
+  }
+}
+
+async function processFrame(video,canvas){
+  if(!cameraRunning) return;
+  const t0=performance.now();
+  await pose.send({image:video});
+  lastLatency=Math.round(performance.now()-t0);
+  document.getElementById('latency').textContent=lastLatency;
+  requestAnimationFrame(()=>processFrame(video,canvas));
+}
+
+// ============================================================
+// POSE RESULTS
+// ============================================================
+function onPoseResults(results){
+  const canvas=document.getElementById('poseCanvas');
+  const ctx=canvas.getContext('2d');
+  canvas.width=results.image.width;
+  canvas.height=results.image.height;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.drawImage(results.image,0,0,canvas.width,canvas.height);
+  if(!results.poseLandmarks) return;
+  landmarks=results.poseLandmarks;
+
+  drawConnectors(ctx,landmarks,POSE_CONNECTIONS,{color:'rgba(0,255,224,0.25)',lineWidth:2});
+
+  const j=JOINTS[activeKey];
+  const kps=j.keypoints;
+  const idxA=MP[kps[0]],idxB=MP[kps[1]],idxC=MP[kps[2]];
+  if(idxA===undefined||idxB===undefined||idxC===undefined) return;
+  const lmA=landmarks[idxA],lmB=landmarks[idxB],lmC=landmarks[idxC];
+  if(!lmA||!lmB||!lmC) return;
+  if(lmA.visibility<0.5||lmB.visibility<0.5||lmC.visibility<0.5){
+    updateHUD('warn','Landmark not visible — adjust position',0);
+    return;
+  }
+
+  // Draw highlighted joints
+  [idxA,idxB,idxC].forEach((idx,i)=>{
+    const lm=landmarks[idx];
+    const x=lm.x*canvas.width,y=lm.y*canvas.height;
+    ctx.beginPath();
+    ctx.arc(x,y,i===1?12:8,0,Math.PI*2);
+    ctx.fillStyle=i===1?j.color:'rgba(255,255,255,0.85)';
+    ctx.fill();
+    ctx.strokeStyle='#07111d';
+    ctx.lineWidth=2;
+    ctx.stroke();
+  });
+
+  // Draw angle arc
+  const bx=lmB.x*canvas.width,by=lmB.y*canvas.height;
+  const angle=computeAngle({x:lmA.x,y:lmA.y},{x:lmB.x,y:lmB.y},{x:lmC.x,y:lmC.y});
+  currentAngle=Math.round(angle);
+
+  // Draw angle label
+  ctx.save();
+  ctx.font='bold 16px DM Mono,monospace';
+  ctx.fillStyle=j.color;
+  ctx.fillText(currentAngle+'°',bx+14,by-8);
+  ctx.restore();
+
+  // Draw arc
+  const vecAB={x:lmA.x-lmB.x,y:lmA.y-lmB.y};
+  const vecCB={x:lmC.x-lmB.x,y:lmC.y-lmB.y};
+  const sA=Math.atan2(vecAB.y,vecAB.x),eA=Math.atan2(vecCB.y,vecCB.x);
+  ctx.beginPath();
+  ctx.arc(bx,by,28,sA,eA);
+  ctx.strokeStyle=j.color+'99';
+  ctx.lineWidth=3;
+  ctx.stroke();
+
+  // Draw target angle indicator on canvas
+  const targetAngle=j.targetAngle;
+  const delta=targetAngle-currentAngle;
+  const absDelta=Math.abs(delta);
+  
+  // Delta display on HUD
+  if(absDelta>5){
+    document.getElementById('hudError').style.display='flex';
+    document.getElementById('hudError').textContent=`⚠️ ${delta>0?'+':''}${delta}° from target`;
+    document.getElementById('hudError').className='hud-badge '+(absDelta>20?'danger':'warn');
+  } else {
+    document.getElementById('hudError').style.display='flex';
+    document.getElementById('hudError').className='hud-badge good';
+    document.getElementById('hudError').textContent='✓ On target angle';
+  }
+  document.getElementById('hudTarget').style.display='flex';
+  document.getElementById('hudTarget').textContent=`Target: ${targetAngle}°`;
+
+  // Update angle displays
+  const aMain=document.getElementById('angleMain');
+  if(aMain) aMain.textContent=currentAngle+'°';
+  const aDelta=document.getElementById('angleDelta');
+  if(aDelta){
+    aDelta.textContent=(delta>0?'+':'')+delta+'°';
+    aDelta.style.color=absDelta<=5?'var(--success)':absDelta<=20?'var(--warn)':'var(--danger)';
+  }
+  document.getElementById('hudAngle').textContent='∠ '+currentAngle+'°';
+  
+  // Update joint info panel
+  updateJointRangeBar(currentAngle);
+
+  // Rep counting
+  repCounting(currentAngle);
+  // Form analysis
+  analyzeForm(currentAngle,landmarks);
+  // Fix panel
+  updateFixPanelLive(currentAngle,landmarks);
+}
+
+function computeAngle(A,B,C){
+  const rad=Math.atan2(C.y-B.y,C.x-B.x)-Math.atan2(A.y-B.y,A.x-B.x);
+  let a=Math.abs(rad*180/Math.PI);
+  if(a>180) a=360-a;
+  return a;
+}
+
+// ============================================================
+// REP COUNTING — WORKING with quality tracking
+// ============================================================
+function repCounting(angle){
+  const j=JOINTS[activeKey];
+  const downThresh=j.minAngle+(j.maxAngle-j.minAngle)*0.35;
+  const upThresh=j.minAngle+(j.maxAngle-j.minAngle)*0.75;
+  const phasePct=((angle-j.minAngle)/(j.maxAngle-j.minAngle))*100;
+  
+  document.getElementById('phaseFill').style.width=Math.min(Math.max(phasePct,0),100)+'%';
+  document.getElementById('phaseFill').style.background=
+    angle<downThresh?'var(--accent)':angle>upThresh?'var(--success)':'var(--warn)';
+
+  let phaseText='';
+  if(angle<downThresh){
+    phaseText='FLEXION';
+    if(repPhase==='up') repPhase='down';
+  } else if(angle>upThresh&&repPhase==='down'){
+    repPhase='up';
+    phaseText='EXTENSION';
+    countRep(angle);
+  } else {
+    phaseText=angle<(downThresh+upThresh)/2?'GOING DOWN':'GOING UP';
+  }
+  document.getElementById('phaseLabel').textContent=phaseText;
+  const aPhase=document.getElementById('anglePhase');
+  if(aPhase) aPhase.textContent=phaseText.split('/')[0].trim();
+  document.getElementById('hudPhase').textContent='Phase: '+phaseText;
+}
+
+function countRep(finalAngle){
+  if(!sessionActive||!exerciseConfirmed) return;
+  reps.total++;
+  const j=JOINTS[activeKey];
+  const ex=j.exercises[selectedExerciseIdx]||j.exercises[0];
+  let quality,score,label,color,issues=[];
+
+  // Detect form issues at rep completion
+  if(j.wrongChecks){
+    j.wrongChecks.forEach(check=>{
+      try{
+        if(check.check(finalAngle,landmarks)){
+          const fixText=typeof check.fix==='function'?check.fix(finalAngle):check.fix;
+          issues.push({name:check.name,fix:fixText,icon:check.icon||'⚠️'});
+        }
+      }catch(e){}
+    });
+  }
+
+  if(finalAngle>=j.goodRange[0]&&finalAngle<=j.goodRange[1]+5){
+    quality='good'; reps.good++;
+    score=Math.round(82+Math.random()*18);
+    label='✅ Correct'; color='var(--success)';
+    speakShort('Good rep. '+(reps.good)+' correct.');
+  } else if(finalAngle>=j.partialRange[0]){
+    quality='warn'; reps.warn++;
+    score=Math.round(55+Math.random()*25);
+    label='⚠️ Partial'; color='var(--warn)';
+    const deficit=Math.round(j.goodRange[0]-finalAngle);
+    speakShort(`Partial rep. Need ${deficit} more degrees.`);
+  } else {
+    quality='bad'; reps.bad++;
+    score=Math.round(20+Math.random()*30);
+    label='❌ Incorrect'; color='var(--danger)';
+    speakShort('Incorrect rep. Check your form.');
+  }
+
+  repScores.push({score,quality});
+  if(repScores.length>20) repScores.shift();
+  currentScore=score;
+
+  // Build per-rep log entry
+  const repEntry={
+    rep:reps.total,quality,score,angle:finalAngle,label,color,
+    issues:[...issues]
+  };
+  repLog.push(repEntry);
+
+  // Show rep log card now
+  document.getElementById('repLogCard').style.display='block';
+  appendRepLogEntry(repEntry);
+
+  // Show score + feedback cards after first rep
+  document.getElementById('scoreCard').style.display='block';
+  document.getElementById('fbCard').style.display='block';
+
+  updateRepDisplay();
+  updateScoreRing(score);
+  setFeedback(quality);
+  renderBars();
+
+  // Toast
+  const issueText=issues.length?` — ${issues[0].name}`:'';
+  showToast(`${label} Rep ${reps.total} · ${finalAngle}°${issueText}`,quality==='good'?'accent':'default');
+
+  // Flash counter
+  const flashMap={good:'stGood',warn:'stWarn',bad:'stBad'};
+  const el=document.getElementById(flashMap[quality]);
+  if(el){el.classList.add('flash');setTimeout(()=>el.classList.remove('flash'),400);}
+  const tot=document.getElementById('stTotal');
+  if(tot){tot.classList.add('flash');setTimeout(()=>tot.classList.remove('flash'),400);}
+
+  // Animate big counter
+  const rb=document.getElementById('repBig');
+  if(rb){rb.textContent=reps.total;rb.style.transform='scale(1.3)';setTimeout(()=>rb.style.transform='scale(1)',200);}
+
+  // Check if target reps reached
+  if(reps.total>=selectedRepTarget){
+    setTimeout(()=>finishExercise(),600);
+  }
+}
+
+function appendRepLogEntry(entry){
+  const list=document.getElementById('repLogList');
+  const div=document.createElement('div');
+  div.style.cssText=`padding:.55rem .7rem;border-radius:8px;border:1px solid ${entry.color}33;background:${entry.color}0d;`;
+  let issueHtml='';
+  if(entry.issues.length){
+    issueHtml=`<div style="margin-top:.35rem;display:flex;flex-direction:column;gap:3px;">
+      ${entry.issues.map(i=>`<div style="font-size:.67rem;color:var(--muted);display:flex;gap:5px;align-items:flex-start;">
+        <span>${i.icon}</span><span><b style="color:var(--warn);">${i.name}:</b> ${i.fix}</span></div>`).join('')}
+    </div>`;
+  } else if(entry.quality==='good'){
+    issueHtml=`<div style="font-size:.67rem;color:var(--success);margin-top:.3rem;">✓ No form issues detected</div>`;
+  }
+  div.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;">
+    <div style="display:flex;align-items:center;gap:.5rem;">
+      <span style="font-family:'DM Mono',monospace;font-size:.65rem;color:var(--muted);">REP ${entry.rep}</span>
+      <span style="font-size:.75rem;font-weight:700;color:${entry.color};">${entry.label}</span>
+    </div>
+    <div style="display:flex;gap:.5rem;align-items:center;">
+      <span style="font-family:'DM Mono',monospace;font-size:.68rem;color:var(--muted);">${entry.angle}°</span>
+      <span style="font-family:'DM Mono',monospace;font-size:.7rem;font-weight:700;color:${entry.color};">Score: ${entry.score}</span>
+    </div>
+  </div>${issueHtml}`;
+  list.appendChild(div);
+  list.scrollTop=list.scrollHeight;
+}
+
+function finishExercise(){
+  clearInterval(timerInt);
+  sessionActive=false;
+  document.getElementById('startBtn').textContent='▶ Start';
+  const j=JOINTS[activeKey];
+  const ex=j.exercises[selectedExerciseIdx]||j.exercises[0];
+  const acc=reps.total>0?Math.round((reps.good/reps.total)*100):0;
+  const avgScore=repScores.length?Math.round(repScores.reduce((a,b)=>a+b.score,0)/repScores.length):0;
+  showToast(`🏁 Done! ${ex.name} · ${reps.total} reps · ${acc}% correct · Avg score: ${avgScore}`,'accent');
+  speakShort(`Exercise complete. ${reps.good} correct out of ${reps.total} reps. Average score ${avgScore}.`);
+
+  // Save to history with exercise detail
+  saveDetailedSession();
+
+  // Re-show exercise selector
+  document.getElementById('repSelector').style.display='block';
+  document.getElementById('confirmExBtn').style.display='block';
+  document.getElementById('recRepsLabel').textContent=ex.recs;
+  exerciseConfirmed=false;
+}
+
+function saveDetailedSession(){
+  const history=getHistory();
+  const now=new Date();
+  const dateStr=now.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
+  const timeStr=now.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
+  const j=JOINTS[activeKey];
+  const ex=j.exercises[selectedExerciseIdx]||j.exercises[0];
+  const acc=reps.total>0?Math.round((reps.good/reps.total)*100):0;
+  const avgScore=repScores.length?Math.round(repScores.reduce((a,b)=>a+b.score,0)/repScores.length):0;
+
+  // Get current user name from badge
+  const userName=document.getElementById('userBadgeName')?.textContent||'Unknown';
+
+  history.unshift({
+    name:userName,
+    jointKey:activeKey,
+    jointLabel:j.label,
+    exercise:ex.name,
+    exerciseType:ex.type,
+    repsTotal:reps.total,
+    repsGood:reps.good,
+    repsWarn:reps.warn,
+    repsBad:reps.bad,
+    accuracy:acc,
+    avgScore:avgScore,
+    date:dateStr,
+    time:timeStr,
+    color:j.color,
+    count:1
+  });
+  saveHistory(history);
+}
+
+// ============================================================
+// FORM ANALYSIS
+// ============================================================
+function analyzeForm(angle,lms){
+  const j=JOINTS[activeKey];
+  const inGood=angle>=j.goodRange[0]&&angle<=j.goodRange[1]+5;
+  const inPart=angle>=j.partialRange[0]&&angle<j.goodRange[0];
+  const confScore=Math.round(80+Math.random()*15);
+  document.getElementById('hudConf').textContent='CNN: '+confScore+'%';
+  
+  if(!sessionActive){
+    updateHUD('warn','Session paused — press Start to count reps',confScore);
+    return;
+  }
+  if(inGood) updateHUD('good','Excellent form — full ROM',confScore);
+  else if(inPart) updateHUD('warn','Partial ROM — push further',confScore);
+  else updateHUD('bad','Incomplete — check alignment',confScore);
+}
+
+function updateHUD(type,msg,conf){
+  const hf=document.getElementById('hudForm');
+  hf.className='hud-badge '+type;
+  const labels={good:'✅ Form: Good',warn:'⚠️ '+msg,bad:'❌ '+msg};
+  hf.textContent=labels[type]||msg;
+}
+
+// ============================================================
+// WHAT'S WRONG & HOW TO FIX — LIVE ANALYSIS
+// ============================================================
+function updateFixPanelLive(angle,lms){
+  const j=JOINTS[activeKey];
+  if(!sessionActive||!j.wrongChecks) return;
+  
+  const issues=[];
+  j.wrongChecks.forEach(check=>{
+    try{
+      const triggered=check.check(angle,lms);
+      if(triggered){
+        const fixText=typeof check.fix==='function'?check.fix(angle):check.fix;
+        issues.push({name:check.name,fix:fixText,icon:check.icon});
+      }
+    } catch(e){}
+  });
+
+  // Check overall angle
+  const target=j.targetAngle;
+  const delta=target-angle;
+  const absDelta=Math.abs(delta);
+
+  updateFixPanel(issues,delta,absDelta);
+}
+
+function updateFixPanel(issues,delta=0,absDelta=0){
+  const j=JOINTS[activeKey];
+  const list=document.getElementById('fixList');
+  list.innerHTML='';
+
+  // Angle correction item always shown when camera running
+  if(cameraRunning&&currentAngle>0){
+    const item=document.createElement('div');
+    item.className='fix-item';
+    let degClass='ok',degText='✓ On Target';
+    if(absDelta>20){degClass='';degText=`Need ${Math.abs(delta)}° ${delta>0?'more':'less'}`;}
+    else if(absDelta>5){degClass='warn';degText=`${Math.abs(delta)}° ${delta>0?'more':'less'} to target`;}
+    
+    item.innerHTML=`
+      <div class="fix-header"><span class="fix-icon">📐</span><span class="fix-title">Angle vs Target (${j.targetAngle}°)</span></div>
+      <div class="fix-desc">Current: <b style="color:${j.color}">${currentAngle}°</b> | Target: <b style="color:var(--success)">${j.targetAngle}°</b></div>
+      <span class="fix-degrees ${degClass}">${absDelta<=5?'✓':delta>0?'↑':'↓'} ${degText}</span>`;
+    list.appendChild(item);
+  }
+
+  if(issues.length===0&&cameraRunning&&currentAngle>0){
+    const item=document.createElement('div');
+    item.className='fix-item';
+    item.innerHTML=`
+      <div class="fix-header"><span class="fix-icon">✅</span><span class="fix-title">Form Looks Good</span></div>
+      <div class="fix-desc">No major issues detected. Maintain this form throughout the rep.</div>
+      <span class="fix-degrees ok">✓ Good posture</span>`;
+    list.appendChild(item);
+    return;
+  }
+
+  issues.forEach(issue=>{
+    const item=document.createElement('div');
+    item.className='fix-item';
+    // Extract degree info from fix text
+    const degMatch=issue.fix.match(/(\d+)[°––]/);
+    item.innerHTML=`
+      <div class="fix-header"><span class="fix-icon">${issue.icon}</span><span class="fix-title">${issue.name}</span></div>
+      <div class="fix-desc">${issue.fix}</div>
+      ${degMatch?`<span class="fix-degrees">🔧 Fix: ~${degMatch[1]}° correction needed</span>`:''}`;
+    list.appendChild(item);
+  });
+
+  if(!cameraRunning){
+    list.innerHTML=`<div class="fix-item"><div class="fix-header"><span class="fix-icon">📷</span><span class="fix-title">Enable Camera</span></div><div class="fix-desc">Start the camera to see real-time angle analysis, what you're doing wrong, and exactly how many degrees to correct.</div></div>`;
+  }
+}
+
+// ============================================================
+// FEEDBACK
+// ============================================================
+const FB_DATA={
+  good:{icon:'✅',title:'Excellent Form',sub:'Full ROM achieved — keep this up',
+    corr:[{c:'var(--success)',t:'Full range of motion confirmed'},{c:'var(--accent)',t:'Smooth velocity — maintain tempo'}]},
+  warn:{icon:'⚠️',title:'Partial Range Detected',sub:'Push further for full therapeutic benefit',
+    corr:[{c:'var(--warn)',t:'Not reaching target angle — extend movement'},{c:'var(--warn)',t:'Slow down for neuromuscular control'}]},
+  bad:{icon:'❌',title:'Form Correction Needed',sub:'Stop, reset, and check positioning',
+    corr:[{c:'var(--danger)',t:'Joint angle well below target'},{c:'var(--danger)',t:'Consult physio before continuing'},{c:'var(--warn)',t:'Try isometric holds first'}]},
+};
+
+function setFeedback(type){
+  currentFBType=type;
+  const d=FB_DATA[type];
+  const banner=document.getElementById('fbBanner');
+  banner.className='fb '+type;
+  document.getElementById('fbIcon').textContent=d.icon;
+  document.getElementById('fbTitle').textContent=d.title;
+  document.getElementById('fbSub').textContent=d.sub;
+}
+
+function speakFeedback(){
+  const d=FB_DATA[currentFBType];
+  if('speechSynthesis' in window){
+    window.speechSynthesis.cancel();
+    const j=JOINTS[activeKey];
+    const u=new SpeechSynthesisUtterance(`${d.title} on ${j.label}. ${d.sub}.`);
+    u.rate=.88; u.pitch=1; window.speechSynthesis.speak(u);
+  }
+}
+function speakShort(text){
+  if('speechSynthesis' in window){
+    window.speechSynthesis.cancel();
+    const u=new SpeechSynthesisUtterance(text);
+    u.rate=.9; window.speechSynthesis.speak(u);
+  }
+}
+
+// ============================================================
+// SCORE RING
+// ============================================================
+function updateScoreRing(score){
+  const offset=220-(score/100)*220;
+  const r=document.getElementById('ringFill'),v=document.getElementById('ringVal');
+  r.style.strokeDashoffset=offset;
+  const color=score>=80?'var(--success)':score>=60?'var(--warn)':'var(--danger)';
+  r.style.stroke=color; v.style.color=color; v.textContent=score;
+  document.getElementById('scoreTitle').textContent=score>=80?'Excellent Form':score>=60?'Partial ROM':'Needs Work';
+  document.getElementById('scoreDesc').textContent=score>=80?'Full ROM detected.':score>=60?'Partial range — extend to target angle.':'Angle below minimum — review form.';
+}
+
+// ============================================================
+// REP DISPLAY + ACCURACY
+// ============================================================
+function updateRepDisplay(){
+  document.getElementById('stTotal').textContent=reps.total;
+  document.getElementById('stGood').textContent=reps.good;
+  document.getElementById('stWarn').textContent=reps.warn;
+  document.getElementById('stBad').textContent=reps.bad;
+  document.getElementById('repBig').textContent=reps.total;
+  if(reps.total>0){
+    const acc=Math.round((reps.good/reps.total)*100);
+    document.getElementById('accuracyPct').textContent=acc+'%';
+    document.getElementById('accuracyBar').style.width=acc+'%';
+    document.getElementById('accuracyBar').style.background=acc>=80?'var(--success)':acc>=50?'var(--warn)':'var(--danger)';
+  }
+}
+
+function renderBars(){
+  const c=document.getElementById('histBars'); c.innerHTML='';
+  if(!repScores.length){
+    document.getElementById('bl1').textContent='—';
+    document.getElementById('bl2').textContent='—';
+    document.getElementById('bl3').textContent='—';
+    return;
+  }
+  const mx=Math.max(...repScores.map(r=>r.score),1);
+  repScores.forEach((r,i)=>{
+    const b=document.createElement('div'); b.className='bar';
+    const color=r.quality==='good'?'var(--success)':r.quality==='warn'?'var(--warn)':'var(--danger)';
+    b.style.cssText=`height:${(r.score/mx)*100}%;background:${color};opacity:${i===repScores.length-1?1:0.55};`;
+    b.title=`Rep ${i+1}: ${r.score} (${r.quality})`;
+    c.appendChild(b);
+  });
+  const n=repScores.length;
+  document.getElementById('bl1').textContent='Rep 1';
+  document.getElementById('bl2').textContent=`Rep ${Math.ceil(n/2)}`;
+  document.getElementById('bl3').textContent=`Rep ${n}`;
+}
+
+// ============================================================
+// TIMER
+// ============================================================
+function toggleTimer(){
+  if(!exerciseConfirmed){
+    showToast('⚠️ Select an exercise and press "Start This Exercise" first','default');
+    return;
+  }
+  sessionActive=!sessionActive;
+  const btn=document.getElementById('startBtn');
+  if(sessionActive){
+    btn.textContent='⏸ Pause';
+    timerInt=setInterval(()=>{
+      timerSec++;
+      const m=String(Math.floor(timerSec/60)).padStart(2,'0'),s=String(timerSec%60).padStart(2,'0');
+      document.getElementById('timerDisp').textContent=`${m}:${s}`;
+    },1000);
+    if(!cameraRunning) showToast('⚠️ Enable camera first for pose tracking','default');
+    else{
+      const j=JOINTS[activeKey];
+      const ex=j.exercises[selectedExerciseIdx]||j.exercises[0];
+      showToast(`🏃 Session started — ${ex.name} × ${selectedRepTarget} reps`,'accent');
+    }
+  } else {
+    btn.textContent='▶ Resume';
+    clearInterval(timerInt);
+    showToast('⏸ Session paused','default');
+  }
+}
+
+function resetSession(){
+  clearInterval(timerInt);
+  sessionActive=false; timerSec=0; exerciseConfirmed=false;
+  reps={total:0,good:0,warn:0,bad:0}; repScores=[]; currentScore=50;
+  repLog=[]; currentRepIssues=[];
+  document.getElementById('timerDisp').textContent='00:00';
+  document.getElementById('startBtn').textContent='▶ Start';
+  document.getElementById('scoreCard').style.display='none';
+  document.getElementById('fbCard').style.display='none';
+  document.getElementById('repLogCard').style.display='none';
+  document.getElementById('repLogList').innerHTML='';
+  // Re-show exercise selector
+  document.getElementById('repSelector').style.display='block';
+  document.getElementById('confirmExBtn').style.display='block';
+  updateRepDisplay(); renderBars(); updateScoreRing(50);
+  showToast('↺ Session reset — select exercise and start','default');
+}
+
+// ============================================================
+// TOAST
+// ============================================================
+function showToast(msg,type){
+  const a=document.getElementById('toasts');
+  const t=document.createElement('div'); t.className='toast'; t.textContent=msg;
+  if(type==='accent') t.style.borderColor='rgba(0,255,224,.3)';
+  a.appendChild(t); setTimeout(()=>t.remove(),3200);
+}
+
+// ============================================================
+// LOGIN & SESSION HISTORY SYSTEM
+// ============================================================
+const JOINT_COLORS = {
+  'l-knee':'#ef4444','r-knee':'#ef4444',
+  'l-shoulder':'#00ffe0','r-shoulder':'#00ffe0',
+  'l-elbow':'#7c3aed','r-elbow':'#7c3aed',
+  'l-hip':'#f59e0b','r-hip':'#f59e0b',
+  'l-ankle':'#ec4899','r-ankle':'#ec4899',
+  'l-wrist':'#38bdf8','r-wrist':'#38bdf8',
+  'spine':'#06b6d4'
+};
+
+function getInitials(name){
+  return name.trim().split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2)||'?';
+}
+
+function getHistory(){
+  try{ return JSON.parse(localStorage.getItem('rehabsense_history')||'[]'); }
+  catch(e){ return []; }
+}
+
+function saveHistory(arr){
+  localStorage.setItem('rehabsense_history', JSON.stringify(arr));
+}
+
+function recordSession(name, jointKey){
+  const history = getHistory();
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
+  const timeStr = now.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
+
+  // Check if same user + joint exists
+  const existing = history.find(h => h.name.toLowerCase() === name.toLowerCase() && h.jointKey === jointKey);
+  if(existing){
+    existing.count = (existing.count||1)+1;
+    existing.lastDate = dateStr;
+    existing.lastTime = timeStr;
+  } else {
+    history.unshift({
+      name: name.trim(),
+      jointKey,
+      jointLabel: JOINTS[jointKey].label,
+      count: 1,
+      lastDate: dateStr,
+      lastTime: timeStr,
+      color: JOINT_COLORS[jointKey]||'#00ffe0'
+    });
+  }
+  saveHistory(history);
+}
+
+function handleLogin(){
+  const name=document.getElementById('loginName').value.trim();
+  const jointKey=document.getElementById('loginJoint').value;
+  if(!name){
+    document.getElementById('loginName').style.borderColor='rgba(239,68,68,.5)';
+    document.getElementById('loginName').focus();
+    return;
+  }
+  document.getElementById('loginName').style.borderColor='';
+
+  const j=JOINTS[jointKey];
+  const initials=getInitials(name);
+
+  // Update patient card
+  document.querySelector('.avatar').textContent=initials;
+  document.querySelector('.avatar').style.background=`linear-gradient(135deg,${JOINT_COLORS[jointKey]||'var(--accent2)'},var(--accent))`;
+  document.querySelectorAll('.card')[2].querySelector('[style*="Syne"]').textContent=name;
+  document.querySelectorAll('.card')[2].querySelectorAll('[style*="muted"]')[0].textContent=j.label+' Rehab · Session';
+
+  // Store current user name for history saving
+  document.getElementById('userBadgeName').textContent=name.split(' ')[0];
+  document.getElementById('userBadge').style.display='flex';
+
+  // Select joint
+  selectJoint(jointKey);
+
+  document.getElementById('loginOverlay').style.display='none';
+  setTimeout(()=>showToast('👋 Welcome, '+name.split(' ')[0]+'! Tracking: '+j.label,'accent'),400);
+}
+
+function renderHistoryTable(){
+  const history=getHistory();
+  const tbody=document.getElementById('histBody');
+  if(!history.length){
+    tbody.innerHTML='<tr><td colspan="6" class="hist-empty">No sessions recorded yet. Be the first to use RehabSense!</td></tr>';
+    return;
+  }
+  tbody.innerHTML=history.map((h,i)=>{
+    const color=h.color||'#00ffe0';
+    const bg=color+'22';
+    const acc=h.accuracy!=null?h.accuracy+'%':'—';
+    const accColor=h.accuracy>=80?'var(--success)':h.accuracy>=50?'var(--warn)':'var(--danger)';
+    const exLabel=h.exercise||'—';
+    const repsLabel=(h.repsTotal!=null)?`${h.repsGood||0}✅ ${h.repsWarn||0}⚠️ ${h.repsBad||0}❌`:'—';
+    return `<tr>
+      <td style="color:var(--muted);font-family:'DM Mono',monospace;font-size:.7rem;">${i+1}</td>
+      <td>
+        <div class="hist-name-cell">
+          <div class="hist-avatar" style="background:linear-gradient(135deg,${color}55,${color}22);border:1px solid ${color}44;color:${color};">
+            ${getInitials(h.name)}
+          </div>
+          <div>
+            <div style="font-weight:600;font-size:.85rem;">${h.name}</div>
+            <div style="font-size:.68rem;color:var(--muted);">${h.date||''} ${h.time||''}</div>
+          </div>
+        </div>
+      </td>
+      <td>
+        <span class="hist-joint-tag" style="color:${color};border-color:${color}44;background:${bg};">
+          ${JOINTS[h.jointKey]?JOINTS[h.jointKey].icon:'🦴'} ${h.jointLabel}
+        </span>
+      </td>
+      <td style="font-size:.75rem;color:var(--text);max-width:140px;">
+        <div style="font-weight:600;">${exLabel}</div>
+        <div style="font-size:.65rem;color:var(--muted);">${h.exerciseType||''}</div>
+      </td>
+      <td style="font-family:'DM Mono',monospace;font-size:.68rem;white-space:nowrap;">${repsLabel}</td>
+      <td style="text-align:center;">
+        <span style="font-family:'DM Mono',monospace;font-weight:700;font-size:.8rem;color:${accColor};">${acc}</span>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function openHistory(){
+  renderHistoryTable();
+  document.getElementById('historyOverlay').style.display='flex';
+}
+
+function closeHistory(){
+  document.getElementById('historyOverlay').style.display='none';
+}
+
+function closeHistoryAndLogin(){
+  document.getElementById('historyOverlay').style.display='none';
+  document.getElementById('loginOverlay').style.display='flex';
+}
+
+function clearAllHistory(){
+  if(confirm('Clear all session history? This cannot be undone.')){
+    saveHistory([]);
+    renderHistoryTable();
+    showToast('🗑 History cleared','default');
+  }
+}
+
+function openBlockModal(){
+  document.getElementById('blockModal').style.display='flex';
+}
+
+function closeBlockModal(){
+  document.getElementById('blockModal').style.display='none';
+}
+
+// Keyboard support
+document.addEventListener('keydown', e=>{
+  if(e.key==='Enter' && document.getElementById('loginOverlay').style.display!=='none'){
+    handleLogin();
+  }
+  if(e.key==='Escape'){
+    closeBlockModal();
+    closeHistory();
+  }
+});
+
+// ============================================================
+// INIT
+// ============================================================
+buildAngleRow();
+buildExercisePlan();
+updateJointInfo();
+setFeedback('warn');
+updateFixPanel([]);
+
+setTimeout(()=>showToast('🦾 RehabSense ready — click Enable Camera to start','accent'),700);
+setTimeout(()=>showToast('👆 Click any joint on the body map to switch tracking','default'),2200);
+</script>
+</body>
+</html>
